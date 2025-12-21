@@ -114,12 +114,14 @@ Use browser automation tools:
 **You MUST complete ALL of these checks before marking any feature as "passes": true**
 
 #### Security Verification (for protected features)
+
 - [ ] Feature respects user role permissions
 - [ ] Unauthenticated access is blocked (redirects to login)
 - [ ] API endpoint checks authorization (returns 401/403 appropriately)
 - [ ] Cannot access other users' data by manipulating URLs
 
 #### Real Data Verification (CRITICAL - NO MOCK DATA)
+
 - [ ] Created unique test data via UI (e.g., "TEST_12345_VERIFY_ME")
 - [ ] Verified the EXACT data I created appears in UI
 - [ ] Refreshed page - data persists (proves database storage)
@@ -128,12 +130,14 @@ Use browser automation tools:
 - [ ] Dashboard/counts reflect real numbers after my changes
 
 #### Navigation Verification
+
 - [ ] All buttons on this page link to existing routes
 - [ ] No 404 errors when clicking any interactive element
 - [ ] Back button returns to correct previous page
 - [ ] Related links (edit, view, delete) have correct IDs in URLs
 
 #### Integration Verification
+
 - [ ] Console shows ZERO JavaScript errors
 - [ ] Network tab shows successful API calls (no 500s)
 - [ ] Data returned from API matches what UI displays
@@ -145,7 +149,9 @@ Use browser automation tools:
 **Run this sweep AFTER EVERY FEATURE before marking it as passing:**
 
 #### 1. Code Pattern Search
+
 Search the codebase for forbidden patterns:
+
 ```bash
 # Search for mock data patterns
 grep -r "mockData\|fakeData\|sampleData\|dummyData\|testData" --include="*.js" --include="*.ts" --include="*.jsx" --include="*.tsx"
@@ -156,7 +162,9 @@ grep -r "hardcoded\|placeholder" --include="*.js" --include="*.ts" --include="*.
 **If ANY matches found related to your feature - FIX THEM before proceeding.**
 
 #### 2. Runtime Verification
+
 For ANY data displayed in UI:
+
 1. Create NEW data with UNIQUE content (e.g., "TEST_12345_DELETE_ME")
 2. Verify that EXACT content appears in the UI
 3. Delete the record
@@ -164,13 +172,17 @@ For ANY data displayed in UI:
 5. **If you see data that wasn't created during testing - IT'S MOCK DATA. Fix it.**
 
 #### 3. Database Verification
+
 Check that:
+
 - Database tables contain only data you created during tests
 - Counts/statistics match actual database record counts
 - No seed data is masquerading as user data
 
 #### 4. API Response Verification
+
 For API endpoints used by this feature:
+
 - Call the endpoint directly
 - Verify response contains actual database data
 - Empty database = empty response (not pre-populated mock data)
@@ -270,7 +282,7 @@ Focus on functional correctness. UI polish can be addressed later.
 
 ## IMPORTANT REMINDERS
 
-**Your Goal:** Production-quality application with ALL tests passing (150/250/400+ depending on complexity)
+**Your Goal:** Production-quality application with ALL tests passing
 
 **This Session's Goal:** Complete at least one feature perfectly
 

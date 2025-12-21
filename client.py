@@ -20,6 +20,8 @@ PLAYWRIGHT_TOOLS = [
     # Core navigation & snapshots
     "mcp__playwright__browser_navigate",
     "mcp__playwright__browser_snapshot",
+    "mcp__playwright__browser_take_screenshot",
+    "mcp__playwright__browser_resize",
     # Interactions
     "mcp__playwright__browser_click",
     "mcp__playwright__browser_fill_form",
