@@ -44,6 +44,8 @@ chmod +x init.sh
 
 Otherwise, start servers manually and document the process.
 
+IMPORTANT! ALWAYS start the app on port 3000! Use npx kill-port 3000 to free up the port if already in use.
+
 ### STEP 3: VERIFICATION TEST (CRITICAL!)
 
 **MANDATORY BEFORE NEW WORK:**
@@ -256,33 +258,20 @@ Before context fills up:
 
 Available tools:
 
-- browser_navigate - Start browser and go to URL
-- browser_snapshot - Get accessibility tree with element refs (use BEFORE interactions)
-- browser_click - Click elements (using ref from snapshot)
-- browser_fill_form - Fill form inputs (using ref from snapshot)
-- browser_type - Type text with keyboard
-- browser_hover - Hover over elements
-- browser_wait_for - Wait for elements/conditions (no manual sleeps needed!)
-- browser_verify_element_visible - Assert element is visible
-- browser_verify_text_visible - Assert text appears on page
-- browser_console_messages - Check for JavaScript errors
-- browser_evaluate - Execute JavaScript (use sparingly, only for debugging)
+- puppeteer_navigate - Start browser and go to URL
+- puppeteer_screenshot - Capture screenshot
+- puppeteer_click - Click elements
+- puppeteer_fill - Fill form inputs
+- puppeteer_evaluate - Execute JavaScript (use sparingly, only for debugging)
 
-**Testing workflow:**
-
-1. browser_navigate → go to URL
-2. browser_snapshot → get element refs (REQUIRED before interactions)
-3. browser_click/browser_fill_form → interact using refs from snapshot
-4. browser_wait_for → wait for UI updates if needed
-5. browser*verify*\* → assert results
-
-Focus on functional correctness. UI polish can be addressed later.
+Test like a human user with mouse and keyboard. Don't take shortcuts by using JavaScript evaluation.
+Don't use the puppeteer "active tab" tool.
 
 ---
 
 ## IMPORTANT REMINDERS
 
-**Your Goal:** Production-quality application with ALL tests passing
+**Your Goal:** Production-quality application with all tests passing
 
 **This Session's Goal:** Complete at least one feature perfectly
 

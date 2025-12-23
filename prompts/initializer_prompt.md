@@ -11,11 +11,12 @@ before proceeding.
 
 ### CRITICAL FIRST TASK: Create feature_list.json
 
-Based on `app_spec.txt`, create a file called `feature_list.json` with 200 detailed
-end-to-end test cases. This file is the single source of truth for what
+Based on `app_spec.txt`, create a file called `feature_list.json` with 340 detailed
+end-to-end test cases (matching the feature_count in the spec). This file is the single source of truth for what
 needs to be built.
 
 **Format:**
+
 ```json
 [
   {
@@ -42,10 +43,12 @@ needs to be built.
 ```
 
 **Requirements for feature_list.json:**
-- Test count based on complexity tier (from app_spec.txt):
-  - **Simple apps**: Minimum 150 tests
-  - **Medium apps**: Minimum 250 tests
-  - **Complex apps**: Minimum 400 tests
+
+- Test count must match the `feature_count` specified in app_spec.txt (currently 340)
+- Reference tiers for other projects:
+  - **Simple apps**: ~150 tests
+  - **Medium apps**: ~250 tests
+  - **Complex apps**: ~400+ tests
 - Both "functional" and "style" categories
 - Mix of narrow tests (2-5 steps) and comprehensive tests (10+ steps)
 - At least 25 tests MUST have 10+ steps each (more for complex apps)
@@ -62,29 +65,29 @@ The feature_list.json **MUST** include tests from ALL of these categories. The m
 
 ### Category Distribution by Complexity Tier
 
-| Category | Simple | Medium | Complex |
-|----------|--------|--------|---------|
-| A. Security & Access Control | 5 | 20 | 40 |
-| B. Navigation Integrity | 15 | 25 | 40 |
-| C. Real Data Verification | 20 | 30 | 50 |
-| D. Workflow Completeness | 10 | 20 | 40 |
-| E. Error Handling | 10 | 15 | 25 |
-| F. UI-Backend Integration | 10 | 20 | 35 |
-| G. State & Persistence | 8 | 10 | 15 |
-| H. URL & Direct Access | 5 | 10 | 20 |
-| I. Double-Action & Idempotency | 5 | 8 | 15 |
-| J. Data Cleanup & Cascade | 5 | 10 | 20 |
-| K. Default & Reset | 5 | 8 | 12 |
-| L. Search & Filter Edge Cases | 8 | 12 | 20 |
-| M. Form Validation | 10 | 15 | 25 |
-| N. Feedback & Notification | 8 | 10 | 15 |
-| O. Responsive & Layout | 8 | 10 | 15 |
-| P. Accessibility | 8 | 10 | 15 |
-| Q. Temporal & Timezone | 5 | 8 | 12 |
-| R. Concurrency & Race Conditions | 5 | 8 | 15 |
-| S. Export/Import | 5 | 6 | 10 |
-| T. Performance | 5 | 5 | 10 |
-| **TOTAL** | **150** | **250** | **400+** |
+| Category                         | Simple  | Medium  | Complex  |
+| -------------------------------- | ------- | ------- | -------- |
+| A. Security & Access Control     | 5       | 20      | 40       |
+| B. Navigation Integrity          | 15      | 25      | 40       |
+| C. Real Data Verification        | 20      | 30      | 50       |
+| D. Workflow Completeness         | 10      | 20      | 40       |
+| E. Error Handling                | 10      | 15      | 25       |
+| F. UI-Backend Integration        | 10      | 20      | 35       |
+| G. State & Persistence           | 8       | 10      | 15       |
+| H. URL & Direct Access           | 5       | 10      | 20       |
+| I. Double-Action & Idempotency   | 5       | 8       | 15       |
+| J. Data Cleanup & Cascade        | 5       | 10      | 20       |
+| K. Default & Reset               | 5       | 8       | 12       |
+| L. Search & Filter Edge Cases    | 8       | 12      | 20       |
+| M. Form Validation               | 10      | 15      | 25       |
+| N. Feedback & Notification       | 8       | 10      | 15       |
+| O. Responsive & Layout           | 8       | 10      | 15       |
+| P. Accessibility                 | 8       | 10      | 15       |
+| Q. Temporal & Timezone           | 5       | 8       | 12       |
+| R. Concurrency & Race Conditions | 5       | 8       | 15       |
+| S. Export/Import                 | 5       | 6       | 10       |
+| T. Performance                   | 5       | 5       | 10       |
+| **TOTAL**                        | **150** | **250** | **400+** |
 
 ---
 
@@ -93,6 +96,7 @@ The feature_list.json **MUST** include tests from ALL of these categories. The m
 Test that unauthorized access is blocked and permissions are enforced.
 
 **Required tests (examples):**
+
 - Unauthenticated user cannot access protected routes (redirect to login)
 - Regular user cannot access admin-only pages (403 or redirect)
 - API endpoints return 401 for unauthenticated requests
@@ -112,6 +116,7 @@ Test that unauthorized access is blocked and permissions are enforced.
 Test that every button, link, and menu item goes to the correct place.
 
 **Required tests (examples):**
+
 - Every button in sidebar navigates to correct page
 - Every menu item links to existing route
 - All CRUD action buttons (Edit, Delete, View) go to correct URLs with correct IDs
@@ -131,6 +136,7 @@ Test that every button, link, and menu item goes to the correct place.
 Test that data is real (not mocked) and persists correctly.
 
 **Required tests (examples):**
+
 - Create a record via UI with unique content → verify it appears in list
 - Create a record → refresh page → record still exists
 - Create a record → log out → log in → record still exists
@@ -151,6 +157,7 @@ Test that data is real (not mocked) and persists correctly.
 Test that every workflow can be completed end-to-end through the UI.
 
 **Required tests (examples):**
+
 - Every entity has working Create operation via UI form
 - Every entity has working Read/View operation (detail page loads)
 - Every entity has working Update operation (edit form saves)
@@ -169,6 +176,7 @@ Test that every workflow can be completed end-to-end through the UI.
 Test graceful handling of errors and edge cases.
 
 **Required tests (examples):**
+
 - Network failure shows user-friendly error message, not crash
 - Invalid form input shows field-level errors
 - API errors display meaningful messages to user
@@ -186,6 +194,7 @@ Test graceful handling of errors and edge cases.
 Test that frontend and backend communicate correctly.
 
 **Required tests (examples):**
+
 - Frontend request format matches what backend expects
 - Backend response format matches what frontend parses
 - All dropdown options come from real database data (not hardcoded)
@@ -204,6 +213,7 @@ Test that frontend and backend communicate correctly.
 Test that state is maintained correctly across sessions and tabs.
 
 **Required tests (examples):**
+
 - Refresh page mid-form - appropriate behavior (data kept or cleared)
 - Close browser, reopen - session state handled correctly
 - Same user in two browser tabs - changes sync or handled gracefully
@@ -217,6 +227,7 @@ Test that state is maintained correctly across sessions and tabs.
 Test direct URL access and URL manipulation security.
 
 **Required tests (examples):**
+
 - Change entity ID in URL - cannot access others' data
 - Access /admin directly as regular user - blocked
 - Malformed URL parameters - handled gracefully (no crash)
@@ -231,6 +242,7 @@ Test direct URL access and URL manipulation security.
 Test that rapid or duplicate actions don't cause issues.
 
 **Required tests (examples):**
+
 - Double-click submit button - only one record created
 - Rapid multiple clicks on delete - only one deletion occurs
 - Submit form, hit back, submit again - appropriate behavior
@@ -244,6 +256,7 @@ Test that rapid or duplicate actions don't cause issues.
 Test that deleting data cleans up properly everywhere.
 
 **Required tests (examples):**
+
 - Delete parent entity - children removed from all views
 - Delete item - removed from search results immediately
 - Delete item - statistics/counts updated immediately
@@ -257,6 +270,7 @@ Test that deleting data cleans up properly everywhere.
 Test that defaults and reset functionality work correctly.
 
 **Required tests (examples):**
+
 - New form shows correct default values
 - Date pickers default to sensible dates (today, not 1970)
 - Dropdowns default to correct option (or placeholder)
@@ -270,9 +284,10 @@ Test that defaults and reset functionality work correctly.
 Test search and filter functionality thoroughly.
 
 **Required tests (examples):**
+
 - Empty search shows all results (or appropriate message)
 - Search with only spaces - handled correctly
-- Search with special characters (!@#$%^&*) - no errors
+- Search with special characters (!@#$%^&\*) - no errors
 - Search with quotes - handled correctly
 - Search with very long string - handled correctly
 - Filter combinations that return zero results - shows message
@@ -286,6 +301,7 @@ Test search and filter functionality thoroughly.
 Test all form validation rules exhaustively.
 
 **Required tests (examples):**
+
 - Required field empty - shows error, blocks submit
 - Email field with invalid email formats - shows error
 - Password field - enforces complexity requirements
@@ -304,6 +320,7 @@ Test all form validation rules exhaustively.
 Test that users get appropriate feedback for all actions.
 
 **Required tests (examples):**
+
 - Every successful save/create shows success feedback
 - Every failed action shows error feedback
 - Loading spinner during every async operation
@@ -318,6 +335,7 @@ Test that users get appropriate feedback for all actions.
 Test that the UI works on different screen sizes.
 
 **Required tests (examples):**
+
 - Desktop layout correct at 1920px width
 - Tablet layout correct at 768px width
 - Mobile layout correct at 375px width
@@ -333,6 +351,7 @@ Test that the UI works on different screen sizes.
 Test basic accessibility compliance.
 
 **Required tests (examples):**
+
 - Tab navigation works through all interactive elements
 - Focus ring visible on all focused elements
 - Screen reader can navigate main content areas
@@ -349,6 +368,7 @@ Test basic accessibility compliance.
 Test date/time handling.
 
 **Required tests (examples):**
+
 - Dates display in user's local timezone
 - Created/updated timestamps accurate and formatted correctly
 - Date picker allows only valid date ranges
@@ -362,6 +382,7 @@ Test date/time handling.
 Test multi-user and race condition scenarios.
 
 **Required tests (examples):**
+
 - Two users edit same record - last save wins or conflict shown
 - Record deleted while another user viewing - graceful handling
 - List updates while user on page 2 - pagination still works
@@ -374,6 +395,7 @@ Test multi-user and race condition scenarios.
 Test data export and import functionality.
 
 **Required tests (examples):**
+
 - Export all data - file contains all records
 - Export filtered data - only filtered records included
 - Import valid file - all records created correctly
@@ -386,6 +408,7 @@ Test data export and import functionality.
 Test basic performance requirements.
 
 **Required tests (examples):**
+
 - Page loads in <3s with 100 records
 - Page loads in <5s with 1000 records
 - Search responds in <1s
@@ -401,6 +424,7 @@ Test basic performance requirements.
 The feature_list.json must include tests that **actively verify real data** and **detect mock data patterns**.
 
 **Include these specific tests:**
+
 1. Create unique test data (e.g., "TEST_12345_VERIFY_ME")
 2. Verify that EXACT data appears in UI
 3. Refresh page - data persists
@@ -408,6 +432,7 @@ The feature_list.json must include tests that **actively verify real data** and 
 5. If data appears that wasn't created during test - FLAG AS MOCK DATA
 
 **The agent implementing features MUST NOT use:**
+
 - Hardcoded arrays of fake data
 - `mockData`, `fakeData`, `sampleData`, `dummyData` variables
 - `// TODO: replace with real API`
@@ -436,6 +461,7 @@ Base the script on the technology stack specified in `app_spec.txt`.
 ### THIRD TASK: Initialize Git
 
 Create a git repository and make your first commit with:
+
 - feature_list.json (complete with all features per complexity tier: 150+/250+/400+)
 - init.sh (environment setup script)
 - README.md (project overview and setup instructions)
@@ -452,6 +478,7 @@ components mentioned in the spec.
 
 If you have time remaining in this session, you may begin implementing
 the highest-priority features from feature_list.json. Remember:
+
 - Work on ONE feature at a time
 - Test thoroughly before marking "passes": true
 - Commit your progress before session ends
@@ -459,6 +486,7 @@ the highest-priority features from feature_list.json. Remember:
 ### ENDING THIS SESSION
 
 Before your context fills up:
+
 1. Commit all work with descriptive messages
 2. Create `claude-progress.txt` with a summary of what you accomplished
 3. Ensure feature_list.json is complete and saved
