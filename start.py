@@ -10,6 +10,19 @@ import subprocess
 from pathlib import Path
 
 
+# Directory containing prompt files
+PROMPTS_DIR = Path(__file__).parent / "prompts"
+
+
+def check_spec_exists() -> bool:
+    """Check if valid spec files exist."""
+    app_spec = PROMPTS_DIR / "app_spec.txt"
+    if not app_spec.exists():
+        return False
+    content = app_spec.read_text(encoding="utf-8")
+    return "<project_specification>" in content
+
+
 def get_existing_projects() -> list[str]:
     """Get list of existing projects from generations folder."""
     generations_dir = Path("generations")
@@ -91,6 +104,95 @@ def get_new_project_name() -> str | None:
     return name
 
 
+def run_spec_creation() -> bool:
+    """Run Claude Code with /create-spec command to create project specification."""
+    print("\n" + "=" * 50)
+    print("  Project Specification Setup")
+    print("=" * 50)
+    print("\nLaunching Claude Code for interactive spec creation...")
+    print("Answer the questions to define your project.")
+    print("When done, Claude will generate the spec files.")
+    print("Exit Claude Code (Ctrl+C or /exit) when finished.\n")
+
+    try:
+        # Launch Claude Code with /create-spec command
+        # This blocks until user exits Claude Code
+        subprocess.run(
+            ["claude", "/create-spec"],
+            check=False,  # Don't raise on non-zero exit
+            cwd=str(Path(__file__).parent)  # Run from project root
+        )
+
+        # Check if spec was created
+        if check_spec_exists():
+            print("\n" + "-" * 50)
+            print("Spec files created successfully!")
+            return True
+        else:
+            print("\n" + "-" * 50)
+            print("Spec creation incomplete. Please try again.")
+            return False
+
+    except FileNotFoundError:
+        print("\nError: 'claude' command not found.")
+        print("Make sure Claude Code CLI is installed:")
+        print("  npm install -g @anthropic-ai/claude-code")
+        return False
+    except KeyboardInterrupt:
+        print("\n\nSpec creation cancelled.")
+        return False
+
+
+def ask_spec_creation_choice() -> str | None:
+    """Ask user whether to create spec with Claude or skip."""
+    print("\n" + "-" * 40)
+    print("  Specification Setup")
+    print("-" * 40)
+    print("\nHow would you like to define your project?")
+    print("\n[1] Create spec with Claude (recommended)")
+    print("    Interactive conversation to define your project")
+    print("\n[2] Skip - use existing spec")
+    print("    Use manually edited app_spec.txt and initializer_prompt.md")
+    print("\n[b] Back to main menu")
+    print()
+
+    while True:
+        choice = input("Select [1/2/b]: ").strip().lower()
+        if choice in ['1', '2', 'b']:
+            return choice
+        print("Invalid choice. Please enter 1, 2, or b.")
+
+
+def create_new_project_flow() -> str | None:
+    """Get project name and optionally create spec."""
+    project_name = get_new_project_name()
+    if not project_name:
+        return None
+
+    # Ask user how they want to handle spec creation
+    choice = ask_spec_creation_choice()
+
+    if choice == 'b':
+        return None
+    elif choice == '1':
+        # Create spec with Claude
+        success = run_spec_creation()
+        if not success:
+            return None
+    elif choice == '2':
+        # Skip - verify spec exists
+        if check_spec_exists():
+            print("\nUsing existing spec files.")
+        else:
+            print("\nWarning: No valid spec found in prompts/app_spec.txt")
+            print("The agent may not work correctly without a spec.")
+            confirm = input("Continue anyway? [y/N]: ").strip().lower()
+            if confirm != 'y':
+                return None
+
+    return project_name
+
+
 def run_agent(project_name: str) -> None:
     """Run the autonomous agent with the given project."""
     print(f"\nStarting agent for project: {project_name}")
@@ -123,7 +225,7 @@ def main() -> None:
             break
 
         elif choice == '1':
-            project_name = get_new_project_name()
+            project_name = create_new_project_flow()
             if project_name:
                 run_agent(project_name)
 
