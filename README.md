@@ -1,141 +1,150 @@
-# Autonomous Coding Agent Demo
+# Autonomous Coding Agent
 
-A minimal harness demonstrating long-running autonomous coding with the Claude Agent SDK. This demo implements a two-agent pattern (initializer + coding agent) that can build complete applications over multiple sessions.
+A long-running autonomous coding agent powered by the Claude Agent SDK. This tool can build complete applications over multiple sessions using a two-agent pattern (initializer + coding agent).
 
 ## Video Walkthrough
 
 [![Watch the video](https://img.youtube.com/vi/YW09hhnVqNM/maxresdefault.jpg)](https://youtu.be/YW09hhnVqNM)
 
-> 🎬 **[Watch the setup and usage guide →](https://youtu.be/YW09hhnVqNM)**
+> **[Watch the setup and usage guide →](https://youtu.be/YW09hhnVqNM)**
+
+---
 
 ## Prerequisites
 
-**Required:** Install the latest versions of both Claude Code and the Claude Agent SDK:
+### Claude Code CLI (Required)
 
+This project requires the Claude Code CLI to be installed. Install it using one of these methods:
+
+**macOS / Linux:**
 ```bash
-# Install Claude Code CLI (latest version required)
-npm install -g @anthropic-ai/claude-code
-
-# Install Python dependencies
-pip install -r requirements.txt
+curl -fsSL https://claude.ai/install.sh | bash
 ```
 
-Verify your installations:
-
-```bash
-claude --version  # Should be latest version
-pip show claude-code-sdk  # Check SDK is installed
+**Windows (PowerShell):**
+```powershell
+irm https://claude.ai/install.ps1 | iex
 ```
 
-## Configuration
+### Authentication
 
-Copy the example environment file and add your credentials:
+You need one of the following:
 
-```bash
-cp .env.example .env
-```
+- **Claude Pro/Max Subscription** - Use `claude login` to authenticate (recommended)
+- **Anthropic API Key** - Pay-per-use from https://console.anthropic.com/
 
-Edit `.env` and configure at least one authentication method:
-
-```bash
-# Authentication (at least one required)
-ANTHROPIC_API_KEY=your-api-key-here
-# OR
-CLAUDE_CODE_OAUTH_TOKEN=your-oauth-token-here
-
-# Optional: N8N webhook for progress notifications
-# PROGRESS_N8N_WEBHOOK_URL=https://your-n8n-instance.com/webhook/...
-```
-
-**Getting credentials:**
-
-- **API Key:** Get from https://console.anthropic.com/
-- **OAuth Token:** Run `claude setup-token` if using Claude Code CLI authentication
+---
 
 ## Quick Start
 
-```bash
-python autonomous_agent_demo.py --project-dir ./my_project
-```
-
-For testing with limited iterations:
+### 1. Clone the Repository
 
 ```bash
-python autonomous_agent_demo.py --project-dir ./my_project --max-iterations 3
+git clone https://github.com/your-repo/autonomous-coding.git
+cd autonomous-coding
 ```
 
-## Important Timing Expectations
+### 2. Run the Start Script
 
-> **Warning: This demo takes a long time to run!**
+**Windows:**
+```cmd
+start.bat
+```
 
-- **First session (initialization):** The agent generates a `feature_list.json` with 200 test cases. This takes several minutes and may appear to hang - this is normal. The agent is writing out all the features.
+**macOS / Linux:**
+```bash
+./start.sh
+```
 
-- **Subsequent sessions:** Each coding iteration can take **5-15 minutes** depending on complexity.
+The start script will:
+1. Check if Claude CLI is installed
+2. Check if you're authenticated (prompt to run `claude login` if not)
+3. Create a Python virtual environment
+4. Install dependencies
+5. Launch the main menu
 
-- **Full app:** Building all 200 features typically requires **many hours** of total runtime across multiple sessions.
+### 3. Create or Continue a Project
 
-**Tip:** The 200 features parameter in the prompts is designed for comprehensive coverage. If you want faster demos, you can modify `prompts/initializer_prompt.md` to reduce the feature count (e.g., 20-50 features for a quicker demo).
+You'll see a menu with options to:
+- **Create new project** - Start a fresh project with AI-assisted spec generation
+- **Continue existing project** - Resume work on a previous project
+
+For new projects, you can use the built-in `/create-spec` command to interactively create your app specification with Claude's help.
+
+---
 
 ## How It Works
 
 ### Two-Agent Pattern
 
-1. **Initializer Agent (Session 1):** Reads `app_spec.txt`, creates `feature_list.json` with 200 test cases, sets up project structure, and initializes git.
+1. **Initializer Agent (First Session):** Reads your app specification, creates a `feature_list.json` with test cases, sets up the project structure, and initializes git.
 
-2. **Coding Agent (Sessions 2+):** Picks up where the previous session left off, implements features one by one, and marks them as passing in `feature_list.json`.
+2. **Coding Agent (Subsequent Sessions):** Picks up where the previous session left off, implements features one by one, and marks them as passing in `feature_list.json`.
 
 ### Session Management
 
 - Each session runs with a fresh context window
 - Progress is persisted via `feature_list.json` and git commits
 - The agent auto-continues between sessions (3 second delay)
-- Press `Ctrl+C` to pause; run the same command to resume
+- Press `Ctrl+C` to pause; run the start script again to resume
 
-## Security Model
+---
 
-This demo uses a defense-in-depth security approach (see `security.py` and `client.py`):
+## Important Timing Expectations
 
-1. **OS-level Sandbox:** Bash commands run in an isolated environment
-2. **Filesystem Restrictions:** File operations restricted to the project directory only
-3. **Bash Allowlist:** Only specific commands are permitted:
-   - File inspection: `ls`, `cat`, `head`, `tail`, `wc`, `grep`
-   - Node.js: `npm`, `node`
-   - Version control: `git`
-   - Process management: `ps`, `lsof`, `sleep`, `pkill` (dev processes only)
+> **Note: Building complete applications takes time!**
 
-Commands not in the allowlist are blocked by the security hook.
+- **First session (initialization):** The agent generates feature test cases. This takes several minutes and may appear to hang - this is normal.
+
+- **Subsequent sessions:** Each coding iteration can take **5-15 minutes** depending on complexity.
+
+- **Full app:** Building all features typically requires **many hours** of total runtime across multiple sessions.
+
+**Tip:** The feature count in the prompts determines scope. For faster demos, you can modify your app spec to target fewer features (e.g., 20-50 features for a quick demo).
+
+---
 
 ## Project Structure
 
 ```
 autonomous-coding/
-├── autonomous_agent_demo.py  # Main entry point
+├── start.bat                 # Windows start script
+├── start.sh                  # macOS/Linux start script
+├── start.py                  # Main menu and project management
+├── autonomous_agent_demo.py  # Agent entry point
 ├── agent.py                  # Agent session logic
 ├── client.py                 # Claude SDK client configuration
 ├── security.py               # Bash command allowlist and validation
 ├── progress.py               # Progress tracking utilities
 ├── prompts.py                # Prompt loading utilities
-├── prompts/
-│   ├── app_spec.txt          # Application specification
-│   ├── initializer_prompt.md # First session prompt
-│   └── coding_prompt.md      # Continuation session prompt
+├── .claude/
+│   ├── commands/
+│   │   └── create-spec.md    # Interactive spec creation command
+│   └── templates/            # Prompt templates
+├── generations/              # Generated projects go here
 ├── requirements.txt          # Python dependencies
-└── .env.example              # Environment variables template
+└── .env                      # Optional configuration (N8N webhook)
 ```
+
+---
 
 ## Generated Project Structure
 
-After running, your project directory will contain:
+After the agent runs, your project directory will contain:
 
 ```
-my_project/
+generations/my_project/
 ├── feature_list.json         # Test cases (source of truth)
-├── app_spec.txt              # Copied specification
+├── prompts/
+│   ├── app_spec.txt          # Your app specification
+│   ├── initializer_prompt.md # First session prompt
+│   └── coding_prompt.md      # Continuation session prompt
 ├── init.sh                   # Environment setup script
 ├── claude-progress.txt       # Session progress notes
-├── .claude_settings.json     # Security settings
 └── [application files]       # Generated application code
 ```
+
+---
 
 ## Running the Generated Application
 
@@ -152,96 +161,81 @@ npm install
 npm run dev
 ```
 
-The application will typically be available at `http://localhost:3000` or similar (check the agent's output or `init.sh` for the exact URL).
+The application will typically be available at `http://localhost:3000` or similar.
 
-## Command Line Options
+---
 
-| Option             | Description               | Default                      |
-| ------------------ | ------------------------- | ---------------------------- |
-| `--project-dir`    | Directory for the project | `./autonomous_demo_project`  |
-| `--max-iterations` | Max agent iterations      | Unlimited                    |
-| `--model`          | Claude model to use       | `claude-sonnet-4-5-20250929` |
+## Security Model
+
+This project uses a defense-in-depth security approach (see `security.py` and `client.py`):
+
+1. **OS-level Sandbox:** Bash commands run in an isolated environment
+2. **Filesystem Restrictions:** File operations restricted to the project directory only
+3. **Bash Allowlist:** Only specific commands are permitted:
+   - File inspection: `ls`, `cat`, `head`, `tail`, `wc`, `grep`
+   - Node.js: `npm`, `node`
+   - Version control: `git`
+   - Process management: `ps`, `lsof`, `sleep`, `pkill` (dev processes only)
+
+Commands not in the allowlist are blocked by the security hook.
+
+---
+
+## Configuration (Optional)
+
+### N8N Webhook Integration
+
+The agent can send progress notifications to an N8N webhook. Create a `.env` file:
+
+```bash
+# Optional: N8N webhook for progress notifications
+PROGRESS_N8N_WEBHOOK_URL=https://your-n8n-instance.com/webhook/your-webhook-id
+```
+
+When test progress increases, the agent sends:
+
+```json
+{
+  "event": "test_progress",
+  "passing": 45,
+  "total": 200,
+  "percentage": 22.5,
+  "project": "my_project",
+  "timestamp": "2025-01-15T14:30:00.000Z"
+}
+```
+
+---
 
 ## Customization
 
 ### Changing the Application
 
-Edit `prompts/app_spec.txt` to specify a different application to build.
-
-### Adjusting Feature Count
-
-Edit `prompts/initializer_prompt.md` and change the "200 features" requirement to a smaller number for faster demos.
+Use the `/create-spec` command when creating a new project, or manually edit the files in your project's `prompts/` directory:
+- `app_spec.txt` - Your application specification
+- `initializer_prompt.md` - Controls feature generation
 
 ### Modifying Allowed Commands
 
 Edit `security.py` to add or remove commands from `ALLOWED_COMMANDS`.
 
-## N8N Webhook Integration (Optional)
-
-The agent can send progress notifications to an N8N webhook when tests pass. This is useful for monitoring long-running agent sessions.
-
-### Setup
-
-Add the webhook URL to your `.env` file:
-
-```bash
-PROGRESS_N8N_WEBHOOK_URL=https://your-n8n-instance.com/webhook/your-webhook-id
-```
-
-### Webhook Payload
-
-When test progress increases, the agent sends a POST request with the following JSON structure (wrapped in an array as N8N expects):
-
-```json
-[
-  {
-    "event": "test_progress",
-    "passing": 45,
-    "total": 200,
-    "percentage": 22.5,
-    "previous_passing": 42,
-    "tests_completed_this_session": 3,
-    "completed_tests": [
-      "[Authentication] User can log in with valid credentials",
-      "[Dashboard] Display user profile information",
-      "[API] GET /users endpoint returns user list"
-    ],
-    "project": "my_project",
-    "timestamp": "2025-01-15T14:30:00.000Z"
-  }
-]
-```
-
-### Payload Fields
-
-| Field                          | Type   | Description                                  |
-| ------------------------------ | ------ | -------------------------------------------- |
-| `event`                        | string | Always `"test_progress"`                     |
-| `passing`                      | number | Current number of passing tests              |
-| `total`                        | number | Total number of tests                        |
-| `percentage`                   | number | Percentage complete (0-100)                  |
-| `previous_passing`             | number | Passing tests before this update             |
-| `tests_completed_this_session` | number | Tests completed since last notification      |
-| `completed_tests`              | array  | Descriptions of newly passing tests          |
-| `project`                      | string | Project name (from `--project-dir` argument) |
-| `timestamp`                    | string | ISO 8601 timestamp (UTC)                     |
-
-### Notes
-
-- Notifications are only sent when progress **increases** (not on every check)
-- If the webhook URL is not configured, no notifications are sent (silent skip)
-- Failed webhook calls are logged but don't stop the agent
+---
 
 ## Troubleshooting
 
+**"Claude CLI not found"**
+Install the Claude Code CLI using the instructions in the Prerequisites section.
+
+**"Not authenticated with Claude"**
+Run `claude login` to authenticate. The start script will prompt you to do this automatically.
+
 **"Appears to hang on first run"**
-This is normal. The initializer agent is generating 200 detailed test cases, which takes significant time. Watch for `[Tool: ...]` output to confirm the agent is working.
+This is normal. The initializer agent is generating detailed test cases, which takes significant time. Watch for `[Tool: ...]` output to confirm the agent is working.
 
 **"Command blocked by security hook"**
 The agent tried to run a command not in the allowlist. This is the security system working as intended. If needed, add the command to `ALLOWED_COMMANDS` in `security.py`.
 
-**"API key not set"**
-Ensure you have configured either `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` in your `.env` file. See the [Configuration](#configuration) section.
+---
 
 ## License
 
