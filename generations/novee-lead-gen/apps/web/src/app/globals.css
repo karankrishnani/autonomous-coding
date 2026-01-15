@@ -1,0 +1,161 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Base styles */
+@layer base {
+  :root {
+    /* Light theme colors */
+    --color-primary: #2563EB;
+    --color-primary-dark: #1E40AF;
+    --color-secondary: #10B981;
+    --color-accent: #F59E0B;
+    --color-background: #FFFFFF;
+    --color-surface: #F8FAFC;
+    --color-text-primary: #111827;
+    --color-text-secondary: #6B7280;
+    --color-text-muted: #9CA3AF;
+    --color-border: #E5E7EB;
+    --color-border-focus: #2563EB;
+  }
+
+  .dark {
+    /* Dark theme colors */
+    --color-primary: #60A5FA;
+    --color-secondary: #34D399;
+    --color-background: #111827;
+    --color-surface: #1F2937;
+    --color-text-primary: #F9FAFB;
+    --color-text-secondary: #D1D5DB;
+    --color-text-muted: #9CA3AF;
+    --color-border: #374151;
+    --color-border-focus: #60A5FA;
+  }
+
+  body {
+    @apply bg-white text-text-primary antialiased;
+    font-family: 'Inter', system-ui, sans-serif;
+  }
+
+  .dark body {
+    @apply bg-gray-900 text-gray-100;
+  }
+}
+
+/* Component styles */
+@layer components {
+  /* Primary button */
+  .btn-primary {
+    @apply bg-primary text-white px-6 py-3 rounded-full font-medium
+           hover:bg-primary-dark transition-colors duration-150
+           disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  /* Secondary button */
+  .btn-secondary {
+    @apply bg-primary-dark text-white px-6 py-3 rounded-full font-medium
+           hover:bg-blue-900 transition-colors duration-150
+           disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  /* Tertiary/outline button */
+  .btn-tertiary {
+    @apply bg-transparent border border-gray-300 text-gray-700 px-6 py-3 rounded-full font-medium
+           hover:bg-gray-50 transition-colors duration-150
+           disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  /* Google OAuth button */
+  .btn-google {
+    @apply bg-gray-100 text-gray-700 px-6 py-3 rounded-full font-medium
+           hover:bg-gray-200 transition-colors duration-150 flex items-center justify-center gap-2;
+  }
+
+  /* Input field */
+  .input-field {
+    @apply w-full h-12 px-4 rounded-lg border border-gray-300
+           focus:border-primary focus:ring-2 focus:ring-primary/20 focus:outline-none
+           transition-colors duration-150;
+  }
+
+  /* Input label */
+  .input-label {
+    @apply block text-sm font-medium text-gray-700 mb-1;
+  }
+
+  /* Card */
+  .card {
+    @apply bg-white border border-gray-200 rounded-xl p-6
+           hover:shadow-sm transition-shadow duration-150;
+  }
+
+  /* Status badge - New */
+  .badge-new {
+    @apply bg-blue-100 text-blue-700 px-3 py-1 rounded-full text-sm font-medium;
+  }
+
+  /* Status badge - Connected */
+  .badge-connected {
+    @apply text-green-600 font-medium;
+  }
+
+  /* Status badge - Disconnected */
+  .badge-disconnected {
+    @apply bg-red-100 text-red-800 px-3 py-1 rounded-full text-sm font-medium;
+  }
+
+  /* Status badge - Degraded */
+  .badge-degraded {
+    @apply bg-yellow-100 text-yellow-800 px-3 py-1 rounded-full text-sm font-medium;
+  }
+
+  /* Keyword pill */
+  .keyword-pill {
+    @apply bg-gray-100 text-gray-700 px-3 py-1 rounded-full text-sm;
+  }
+
+  /* Tab - active */
+  .tab-active {
+    @apply text-primary font-medium;
+  }
+
+  /* Tab - inactive */
+  .tab-inactive {
+    @apply text-gray-500 hover:text-gray-700 transition-colors;
+  }
+}
+
+/* Utility styles */
+@layer utilities {
+  /* Text truncation */
+  .line-clamp-3 {
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  /* Custom scrollbar */
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: #E5E7EB transparent;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background-color: #E5E7EB;
+    border-radius: 3px;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+    background-color: #D1D5DB;
+  }
+}
