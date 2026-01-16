@@ -8,7 +8,8 @@ SQLite database schema for feature storage using SQLAlchemy.
 from pathlib import Path
 from typing import Optional
 
-from sqlalchemy import Boolean, Column, Integer, String, Text, create_engine
+from sqlalchemy import Boolean, Column, Integer, String, Text, create_engine, inspect
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.types import JSON
@@ -68,7 +69,17 @@ def create_database(project_dir: Path) -> tuple:
     """
     db_url = get_database_url(project_dir)
     engine = create_engine(db_url, connect_args={"check_same_thread": False})
-    Base.metadata.create_all(bind=engine)
+    
+    inspector = inspect(engine)
+    existing_tables = inspector.get_table_names()
+    
+    if "features" not in existing_tables:
+        try:
+            Base.metadata.create_all(bind=engine)
+        except OperationalError as e:
+            if "already exists" not in str(e).lower():
+                raise
+    
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
     return engine, SessionLocal
 
