@@ -27,7 +27,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
   }
 
   try {
-    const session = getSessionById(id, user.id);
+    const session = await getSessionById(id, user.id);
 
     if (!session) {
       return NextResponse.json(
@@ -69,10 +69,10 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
 
     // If heartbeat is true, just update the last_seen_at
     if (heartbeat === true) {
-      session = updateSessionHeartbeat(id, user.id);
+      session = await updateSessionHeartbeat(id, user.id);
     } else if (device_label && typeof device_label === 'string') {
       // Update the device label
-      session = updateSessionLabel(id, user.id, device_label);
+      session = await updateSessionLabel(id, user.id, device_label);
     } else {
       return NextResponse.json(
         { error: 'Either heartbeat or device_label must be provided' },
@@ -113,7 +113,7 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
   }
 
   try {
-    const deleted = deleteSession(id, user.id);
+    const deleted = await deleteSession(id, user.id);
 
     if (!deleted) {
       return NextResponse.json(

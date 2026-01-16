@@ -64,11 +64,29 @@ function showLoginView() {
 /**
  * Show the dashboard view and hide the login
  */
-function showDashboardView(user: UserInfo) {
+async function showDashboardView(user: UserInfo) {
   if (loginView) loginView.classList.add('hidden');
   if (dashboardView) dashboardView.classList.remove('hidden');
   if (userInfo) userInfo.classList.remove('hidden');
   if (userName) userName.textContent = user.name || user.email;
+
+  // Fetch and display platform connection status
+  await refreshPlatformStatus();
+}
+
+/**
+ * Refresh platform connection status from API
+ */
+async function refreshPlatformStatus() {
+  if (!window.electronAPI) return;
+
+  try {
+    const workspaces = await window.electronAPI.getSlackWorkspaces();
+    console.log('[UI] Fetched workspaces:', workspaces.length);
+    updateSlackStatus(workspaces.length > 0, workspaces.length);
+  } catch (error) {
+    console.error('[UI] Failed to fetch platform status:', error);
+  }
 }
 
 /**

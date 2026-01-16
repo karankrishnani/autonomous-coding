@@ -389,6 +389,66 @@ export type Database = {
         }
         Relationships: []
       }
+      scrape_logs: {
+        Row: {
+          id: string
+          platform_connection_id: string
+          user_id: string
+          status: string
+          started_at: string
+          completed_at: string | null
+          messages_found: number
+          leads_created: number
+          error_message: string | null
+          metadata: Json
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          platform_connection_id: string
+          user_id: string
+          status: string
+          started_at?: string
+          completed_at?: string | null
+          messages_found?: number
+          leads_created?: number
+          error_message?: string | null
+          metadata?: Json
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          platform_connection_id?: string
+          user_id?: string
+          status?: string
+          started_at?: string
+          completed_at?: string | null
+          messages_found?: number
+          leads_created?: number
+          error_message?: string | null
+          metadata?: Json
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "scrape_logs_platform_connection_id_fkey"
+            columns: ["platform_connection_id"]
+            isOneToOne: false
+            referencedRelation: "platform_connections"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "scrape_logs_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       user_fingerprints: {
         Row: {
           collected_at: string

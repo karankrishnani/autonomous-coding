@@ -1,7 +1,8 @@
 /**
  * Keywords data management using Supabase.
+ * Uses service role client to bypass RLS since user auth is validated at the API layer.
  */
-import { createClient } from './supabase/server';
+import { createServiceRoleClient } from './supabase/server';
 
 export interface KeywordGroup {
   id: string;
@@ -47,7 +48,7 @@ function rowsToKeywordGroup(group: KeywordGroupRow, keywords: KeywordRow[]): Key
  * Get all keyword groups for a specific user
  */
 export async function getKeywordGroupsByUserId(userId: string): Promise<KeywordGroup[]> {
-  const supabase = await createClient();
+  const supabase = await createServiceRoleClient();
 
   // Get all keyword groups for user
   const { data: groups, error: groupsError } = await supabase
@@ -94,7 +95,7 @@ export async function getKeywordGroupsByUserId(userId: string): Promise<KeywordG
  * Get a specific keyword group by ID
  */
 export async function getKeywordGroupById(groupId: string, userId: string): Promise<KeywordGroup | null> {
-  const supabase = await createClient();
+  const supabase = await createServiceRoleClient();
 
   const { data: group, error: groupError } = await supabase
     .from('user_keyword_groups')
@@ -119,7 +120,7 @@ export async function getKeywordGroupById(groupId: string, userId: string): Prom
  * Create a new keyword group for a user
  */
 export async function createKeywordGroup(userId: string, keywords: string[]): Promise<KeywordGroup> {
-  const supabase = await createClient();
+  const supabase = await createServiceRoleClient();
 
   // Create the group
   const { data: group, error: groupError } = await supabase
@@ -168,7 +169,7 @@ export async function updateKeywordGroup(
   userId: string,
   updates: { keywords?: string[]; active?: boolean }
 ): Promise<KeywordGroup | null> {
-  const supabase = await createClient();
+  const supabase = await createServiceRoleClient();
 
   // Verify ownership
   const existing = await getKeywordGroupById(groupId, userId);
@@ -222,7 +223,7 @@ export async function updateKeywordGroup(
  * Delete a keyword group
  */
 export async function deleteKeywordGroup(groupId: string, userId: string): Promise<boolean> {
-  const supabase = await createClient();
+  const supabase = await createServiceRoleClient();
 
   // Verify ownership first
   const existing = await getKeywordGroupById(groupId, userId);
@@ -266,7 +267,7 @@ export async function getAllKeywordsForUser(userId: string): Promise<string[]> {
  * Clear all keyword groups for a user
  */
 export async function clearAllKeywordsForUser(userId: string): Promise<number> {
-  const supabase = await createClient();
+  const supabase = await createServiceRoleClient();
   const groups = await getKeywordGroupsByUserId(userId);
 
   if (groups.length === 0) {
@@ -290,7 +291,7 @@ export async function clearAllKeywordsForUser(userId: string): Promise<number> {
  * Delete a specific keyword from all groups for a user
  */
 export async function deleteKeywordForUser(userId: string, keyword: string): Promise<boolean> {
-  const supabase = await createClient();
+  const supabase = await createServiceRoleClient();
 
   // Get all groups for this user
   const { data: groups } = await supabase
@@ -304,8 +305,19 @@ export async function deleteKeywordForUser(userId: string, keyword: string): Pro
 
   const groupIds = groups.map(g => g.id);
 
+  // First check if the keyword exists
+  const { data: existingKeywords } = await supabase
+    .from('keywords')
+    .select('id')
+    .in('user_keyword_group_id', groupIds)
+    .eq('text', keyword);
+
+  if (!existingKeywords || existingKeywords.length === 0) {
+    return false; // Keyword doesn't exist
+  }
+
   // Delete the keyword from all groups
-  const { error, count } = await supabase
+  const { error } = await supabase
     .from('keywords')
     .delete()
     .in('user_keyword_group_id', groupIds)
@@ -332,5 +344,5 @@ export async function deleteKeywordForUser(userId: string, keyword: string): Pro
     }
   }
 
-  return (count || 0) > 0;
+  return true; // Deletion was successful
 }

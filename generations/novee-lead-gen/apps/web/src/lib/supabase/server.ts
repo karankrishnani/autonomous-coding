@@ -8,17 +8,34 @@ import type { Database } from '@novee/shared';
 
 export async function createClient() {
   const cookieStore = await cookies();
+  const projectRef =
+    process.env.NEXT_PUBLIC_SUPABASE_URL?.match(/https:\/\/([^.]+)/)?.[1] || '127';
+  const cookieBaseName = `sb-${projectRef}-auth-token`;
 
-  return createSupabaseServerClient<Database>(
+  // Try to extract session data from base64-encoded cookie
+  let sessionData: { access_token?: string; refresh_token?: string } | null = null;
+  const authCookie = cookieStore.get(cookieBaseName);
+  if (authCookie?.value) {
+    try {
+      const decoded = decodeURIComponent(authCookie.value);
+      sessionData = JSON.parse(Buffer.from(decoded, 'base64').toString('utf-8'));
+    } catch {
+      // Cookie might already be in JSON format or invalid
+      try {
+        sessionData = JSON.parse(authCookie.value);
+      } catch {
+        // Ignore
+      }
+    }
+  }
+
+  const supabase = createSupabaseServerClient<Database>(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
       cookies: {
         getAll() {
           const allCookies = cookieStore.getAll();
-          const projectRef =
-            process.env.NEXT_PUBLIC_SUPABASE_URL?.match(/https:\/\/([^.]+)/)?.[1] || '127';
-          const cookieBaseName = `sb-${projectRef}-auth-token`;
 
           // Process auth cookie - handle URL encoding and base64
           return allCookies.map((cookie) => {
@@ -51,6 +68,16 @@ export async function createClient() {
       },
     }
   );
+
+  // If we have session data, explicitly set the session to ensure auth.uid() works for RLS
+  if (sessionData?.access_token && sessionData?.refresh_token) {
+    await supabase.auth.setSession({
+      access_token: sessionData.access_token,
+      refresh_token: sessionData.refresh_token,
+    });
+  }
+
+  return supabase;
 }
 
 /**

@@ -254,29 +254,155 @@ export async function createLead(
   let channelId = options?.channelId;
 
   if (!channelId) {
-    // For simplicity, we'll look for an existing channel or skip post creation
-    // In a real implementation, you'd need to ensure the channel exists
-    console.warn('No channel ID provided for lead creation');
-    return null;
+    // Find or create a channel for this platform/channel name
+    const channelName = options?.channelName || 'general';
+    const platform = options?.platform || 'SLACK';
+
+    // First, get the user's platform connection for this platform
+    const { data: connection, error: connError } = await supabase
+      .from('platform_connections')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('platform', platform)
+      .eq('status', 'CONNECTED')
+      .single();
+
+    if (connError || !connection) {
+      console.warn('No connected platform found for lead creation, trying to create one');
+
+      // Create a platform connection if none exists
+      const { data: newConn, error: newConnError } = await supabase
+        .from('platform_connections')
+        .insert({
+          user_id: userId,
+          platform,
+          status: 'CONNECTED',
+          metadata: {},
+        })
+        .select()
+        .single();
+
+      if (newConnError || !newConn) {
+        console.error('Failed to create platform connection:', newConnError);
+        return null;
+      }
+
+      // Now create the channel
+      const { data: channel, error: channelError } = await supabase
+        .from('channels')
+        .insert({
+          platform_connection_id: newConn.id,
+          name: channelName,
+          type: 'channel',
+          metadata: {},
+        })
+        .select()
+        .single();
+
+      if (channelError || !channel) {
+        console.error('Failed to create channel:', channelError);
+        return null;
+      }
+
+      channelId = channel.id;
+    } else {
+      // Try to find or create channel for this connection
+      const { data: existingChannel } = await supabase
+        .from('channels')
+        .select('id')
+        .eq('platform_connection_id', connection.id)
+        .eq('name', channelName)
+        .single();
+
+      if (existingChannel) {
+        channelId = existingChannel.id;
+      } else {
+        // Create the channel
+        const { data: newChannel, error: channelError } = await supabase
+          .from('channels')
+          .insert({
+            platform_connection_id: connection.id,
+            name: channelName,
+            type: 'channel',
+            metadata: {},
+          })
+          .select()
+          .single();
+
+        if (channelError || !newChannel) {
+          console.error('Failed to create channel:', channelError);
+          return null;
+        }
+        channelId = newChannel.id;
+      }
+    }
   }
 
-  // Create the post first
-  const { data: post, error: postError } = await supabase
-    .from('posts')
-    .insert({
-      channel_id: channelId,
-      content: postContent,
-      source_url: options?.sourceUrl || null,
-      timestamp: new Date().toISOString(),
-      metadata: {
-        sender_name: options?.senderName || 'Unknown User',
-      },
-    })
-    .select()
-    .single();
+  // Check for existing post with the same source_url to deduplicate
+  let postId = options?.postId;
 
-  if (postError || !post) {
-    console.error('Failed to create post:', postError);
+  if (!postId && options?.sourceUrl) {
+    // Check if post with this source_url already exists
+    const { data: existingPost } = await supabase
+      .from('posts')
+      .select('id')
+      .eq('source_url', options.sourceUrl)
+      .single();
+
+    if (existingPost) {
+      postId = existingPost.id;
+      console.log(`[Dedup] Found existing post with source_url: ${options.sourceUrl}`);
+
+      // Check if a lead already exists for this user and post
+      const { data: existingLead } = await supabase
+        .from('leads')
+        .select('id')
+        .eq('user_id', userId)
+        .eq('post_id', postId)
+        .single();
+
+      if (existingLead) {
+        console.log(`[Dedup] Lead already exists for this post, skipping creation`);
+        return null;
+      }
+    }
+  }
+
+  // Create the post if we don't have one
+  let post: { id: string; timestamp: string } | null = null;
+  if (!postId) {
+    const { data: newPost, error: postError } = await supabase
+      .from('posts')
+      .insert({
+        channel_id: channelId,
+        content: postContent,
+        source_url: options?.sourceUrl || null,
+        timestamp: new Date().toISOString(),
+        metadata: {
+          sender_name: options?.senderName || 'Unknown User',
+        },
+      })
+      .select()
+      .single();
+
+    if (postError || !newPost) {
+      console.error('Failed to create post:', postError);
+      return null;
+    }
+    post = newPost;
+    postId = newPost.id;
+  } else {
+    // Fetch the existing post for return data
+    const { data: existingPost } = await supabase
+      .from('posts')
+      .select('id, timestamp')
+      .eq('id', postId)
+      .single();
+    post = existingPost;
+  }
+
+  if (!post || !postId) {
+    console.error('Failed to get or create post');
     return null;
   }
 
@@ -285,7 +411,7 @@ export async function createLead(
     .from('leads')
     .insert({
       user_id: userId,
-      post_id: post.id,
+      post_id: postId,
       matched_keywords: matchedKeywords,
       status: 'NEW',
     })

@@ -328,6 +328,52 @@ Test like a human user with mouse and keyboard. Don't take shortcuts by using Ja
 
 ---
 
+## DESKTOP APP AUTOMATION
+
+For testing the Electron desktop app, use the MCP desktop automation tools from `@novee/mcp-desktop-automation`.
+
+**Prerequisites:**
+1. Build the desktop app: `pnpm --filter @novee/desktop build`
+2. Ensure the web app is running: `pnpm --filter @novee/web dev`
+
+**Available Tools:**
+
+- `desktop_launch` - Launch the Electron desktop app, returns a sessionId
+- `desktop_close` - Close the desktop app (requires sessionId)
+- `desktop_snapshot` - Get structured element data from the desktop window
+- `desktop_screenshot` - Take a screenshot of the desktop app
+- `desktop_click` - Click an element by selector or text
+- `desktop_type` - Type text into an input field
+- `desktop_wait_for` - Wait for an element or text to appear
+- `desktop_get_text` - Get text content from an element
+- `desktop_evaluate` - Evaluate JavaScript in the renderer
+
+**Example Workflow:**
+
+```
+// 1. Launch desktop app
+const { sessionId } = await desktop_launch({})
+
+// 2. Take initial screenshot
+await desktop_screenshot({ sessionId, filename: 'desktop-initial.png' })
+
+// 3. Get current UI state
+const snapshot = await desktop_snapshot({ sessionId })
+
+// 4. Login
+await desktop_type({ sessionId, selector: 'input[type="email"]', text: 'user@example.com' })
+await desktop_type({ sessionId, selector: 'input[type="password"]', text: 'password' })
+await desktop_click({ sessionId, text: 'Log In' })
+
+// 5. Wait for main screen
+await desktop_wait_for({ sessionId, text: 'Platform Connections' })
+
+// 6. Close app when done
+await desktop_close({ sessionId })
+```
+
+---
+
 ## FEATURE TOOL USAGE RULES (CRITICAL - DO NOT VIOLATE)
 
 The feature tools exist to reduce token usage. **DO NOT make exploratory queries.**

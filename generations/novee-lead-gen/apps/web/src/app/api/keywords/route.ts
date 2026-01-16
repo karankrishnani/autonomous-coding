@@ -79,7 +79,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Create keyword group owned by this user (RLS)
-    const keywordGroup = createKeywordGroup(user.id, keywords);
+    const keywordGroup = await createKeywordGroup(user.id, keywords);
 
     // Track KEYWORDS_SELECTED onboarding event (first time only)
     try {
@@ -138,7 +138,7 @@ export async function DELETE(request: NextRequest) {
 
     if (body.keyword) {
       // Delete a specific keyword
-      const deleted = deleteKeywordForUser(user.id, body.keyword);
+      const deleted = await deleteKeywordForUser(user.id, body.keyword);
 
       if (!deleted) {
         return NextResponse.json(
@@ -154,7 +154,7 @@ export async function DELETE(request: NextRequest) {
     }
 
     // Clear all keywords for this user (RLS)
-    const deletedCount = clearAllKeywordsForUser(user.id);
+    const deletedCount = await clearAllKeywordsForUser(user.id);
 
     return NextResponse.json({
       message: 'All keywords cleared successfully',

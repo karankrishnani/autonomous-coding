@@ -4,7 +4,7 @@ import {
   getStatusColor,
   getStatusLabel,
   PlatformConnectionStatus,
-  PlatformConnection,
+  PlatformConnectionWithScrape,
 } from '@/lib/platforms';
 import { PlatformCard } from '@/components/PlatformCard';
 import Link from 'next/link';
@@ -62,13 +62,14 @@ export default async function PlatformsPage({ searchParams }: PageProps) {
   };
 
   // Get connection data for a platform (real or test)
-  const getConnectionData = (platformId: 'SLACK' | 'LINKEDIN'): Partial<PlatformConnection> | null => {
+  const getConnectionData = (platformId: 'SLACK' | 'LINKEDIN'): Partial<PlatformConnectionWithScrape> | null => {
     if (testStatus && ['CONNECTED', 'DISCONNECTED', 'DEGRADED', 'PENDING'].includes(testStatus.toUpperCase())) {
       // Return mock data for test mode with simulated last sync time
       const status = testStatus.toUpperCase() as PlatformConnectionStatus;
       if (status === 'CONNECTED' || status === 'DEGRADED') {
         return {
           last_checked_at: new Date(Date.now() - 30 * 60 * 1000).toISOString(), // 30 minutes ago
+          lastScrapeAt: new Date(Date.now() - 15 * 60 * 1000).toISOString(), // 15 minutes ago
           connected_at: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(), // 7 days ago
         };
       }
@@ -105,10 +106,15 @@ export default async function PlatformsPage({ searchParams }: PageProps) {
           const isDisconnected = status === 'DISCONNECTED';
           const isDegraded = status === 'DEGRADED';
           const connectionData = platform.available ? getConnectionData(platform.id) : null;
-          const lastSyncTime = connectionData?.last_checked_at ?? null;
+          // Use lastScrapeAt (from scrape_logs) as primary, fallback to last_checked_at
+          const lastSyncTime = connectionData?.lastScrapeAt ?? connectionData?.last_checked_at ?? null;
           const showLastSync = status === 'CONNECTED' || status === 'DEGRADED';
           const showTroubleshooting = isDisconnected || isDegraded;
           const connection = connections.find(c => c.platform === platform.id);
+          // In test mode, provide a test connectionId for testing the View Details link
+          const displayConnectionId = testStatus && (status === 'CONNECTED' || status === 'DEGRADED')
+            ? `test-${platform.id.toLowerCase()}-connection`
+            : connection?.id;
 
           return (
             <PlatformCard
@@ -125,7 +131,7 @@ export default async function PlatformsPage({ searchParams }: PageProps) {
               showLastSync={showLastSync}
               lastSyncTime={lastSyncTime}
               showTroubleshooting={showTroubleshooting}
-              connectionId={connection?.id}
+              connectionId={displayConnectionId}
             />
           );
         })}

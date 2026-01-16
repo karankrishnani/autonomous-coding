@@ -110,7 +110,7 @@ export function PlatformCard({
               </p>
               {showLastSync && (
                 <p className="text-xs text-gray-400 mt-0.5">
-                  Last synced: {formatLastSync(lastSyncTime)}
+                  Last scraped: {formatLastSync(lastSyncTime)}
                 </p>
               )}
             </div>

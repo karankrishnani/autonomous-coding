@@ -22,12 +22,26 @@ export interface PlatformConnection {
   updated_at: string;
 }
 
+export interface PlatformConnectionWithScrape extends PlatformConnection {
+  lastScrapeAt?: string | null;
+  lastScrapeStatus?: string | null;
+  scrapeStats?: {
+    totalScrapes: number;
+    successfulScrapes: number;
+    failedScrapes: number;
+    totalMessagesFound: number;
+    totalLeadsCreated: number;
+  };
+}
+
 /**
- * Get all platform connections for a user
+ * Get all platform connections for a user with last scrape info
  */
-export async function getConnectionsForUser(userId: string): Promise<PlatformConnection[]> {
+export async function getConnectionsForUser(userId: string): Promise<PlatformConnectionWithScrape[]> {
   const supabase = await createClient();
-  const { data, error } = await supabase
+
+  // Get connections
+  const { data: connections, error } = await supabase
     .from('platform_connections')
     .select('*')
     .eq('user_id', userId)
@@ -38,7 +52,37 @@ export async function getConnectionsForUser(userId: string): Promise<PlatformCon
     return [];
   }
 
-  return (data || []) as PlatformConnection[];
+  // Get last scrape info for each connection
+  const connectionsWithScrapeInfo = await Promise.all(
+    (connections || []).map(async (connection) => {
+      // Get most recent scrape logs for this connection
+      const { data: scrapeLogs } = await supabase
+        .from('scrape_logs')
+        .select('started_at, status, messages_found, leads_created')
+        .eq('platform_connection_id', connection.id)
+        .order('started_at', { ascending: false })
+        .limit(100);
+
+      const logs = scrapeLogs || [];
+      const completed = logs.filter(l => l.status === 'COMPLETED');
+      const failed = logs.filter(l => l.status === 'FAILED');
+
+      return {
+        ...connection,
+        lastScrapeAt: logs[0]?.started_at || null,
+        lastScrapeStatus: logs[0]?.status || null,
+        scrapeStats: {
+          totalScrapes: logs.length,
+          successfulScrapes: completed.length,
+          failedScrapes: failed.length,
+          totalMessagesFound: completed.reduce((sum, l) => sum + (l.messages_found || 0), 0),
+          totalLeadsCreated: completed.reduce((sum, l) => sum + (l.leads_created || 0), 0),
+        },
+      } as PlatformConnectionWithScrape;
+    })
+  );
+
+  return connectionsWithScrapeInfo;
 }
 
 /**
@@ -205,8 +249,13 @@ export async function updatePlatformMetadata(
   const supabase = await createServiceRoleClient();
   const now = new Date().toISOString();
 
-  // Find existing connection
-  const existing = await getConnectionByPlatform(userId, platform);
+  // Find existing connection using the service role client (not getConnectionByPlatform which uses regular client)
+  const { data: existing } = await supabase
+    .from('platform_connections')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('platform', platform)
+    .single();
 
   if (!existing) {
     // Create new connection with metadata

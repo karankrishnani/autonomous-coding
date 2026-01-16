@@ -14,7 +14,10 @@
     "db:stop": "supabase stop",
     "db:reset": "supabase db reset",
     "db:status": "supabase status",
-    "db:types": "supabase gen types typescript --local > packages/shared/src/database.types.ts"
+    "db:types": "supabase gen types typescript --local > packages/shared/src/database.types.ts",
+    "desktop:test": "pnpm --filter @novee/desktop test",
+    "desktop:test:headed": "pnpm --filter @novee/desktop test:headed",
+    "desktop:test:debug": "pnpm --filter @novee/desktop test:debug"
   },
   "devDependencies": {
     "@types/node": "^20.10.0",

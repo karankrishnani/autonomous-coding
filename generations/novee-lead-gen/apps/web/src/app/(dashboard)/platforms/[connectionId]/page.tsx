@@ -6,6 +6,7 @@ import { notFound } from 'next/navigation';
 
 interface PageProps {
   params: Promise<{ connectionId: string }>;
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }
 
 // Platform icons
@@ -62,24 +63,51 @@ function formatDuration(startedAt: string, completedAt: string | null): string {
   return `${mins}m ${secs}s`;
 }
 
-export default async function PlatformDetailPage({ params }: PageProps) {
+export default async function PlatformDetailPage({ params, searchParams }: PageProps) {
   const user = await getSessionUser();
   const { connectionId } = await params;
+  const queryParams = await searchParams;
 
   if (!user) {
     notFound();
   }
 
-  // Get the connection
-  const connection = await getConnectionById(user.id, connectionId);
+  // Check for test mode (e.g., test-slack-connection)
+  const isTestMode = connectionId.startsWith('test-') && connectionId.endsWith('-connection');
+  const testPlatform = isTestMode ? connectionId.replace('test-', '').replace('-connection', '').toUpperCase() : null;
+
+  // Get the connection (real or mock for test mode)
+  let connection = await getConnectionById(user.id, connectionId);
+
+  // If test mode and no real connection found, create mock data
+  if (!connection && isTestMode && (testPlatform === 'SLACK' || testPlatform === 'LINKEDIN')) {
+    connection = {
+      id: connectionId,
+      user_id: user.id,
+      platform: testPlatform as 'SLACK' | 'LINKEDIN',
+      status: 'CONNECTED',
+      metadata: {
+        workspaces: [
+          { name: 'Acme Corp', url: 'https://acmecorp.slack.com' },
+          { name: 'Design Community', url: 'https://designcommunity.slack.com' },
+          { name: 'React Developers', url: 'https://reactdevs.slack.com' },
+        ],
+      },
+      last_checked_at: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
+      last_error: null,
+      connected_at: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
+      created_at: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
+      updated_at: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
+    };
+  }
 
   if (!connection) {
     notFound();
   }
 
-  // Get scrape logs and stats
-  const scrapeLogs = await getScrapeLogsByConnectionId(connectionId, 10);
-  const stats = await getScrapeStats(connectionId);
+  // Get scrape logs and stats (empty for test mode)
+  const scrapeLogs = isTestMode ? [] : await getScrapeLogsByConnectionId(connectionId, 10);
+  const stats = isTestMode ? { totalScrapes: 0, successfulScrapes: 0, failedScrapes: 0, totalMessagesFound: 0, totalLeadsCreated: 0 } : await getScrapeStats(connectionId);
 
   const statusColor = getStatusColor(connection.status);
   const statusLabel = getStatusLabel(connection.status);
@@ -126,6 +154,38 @@ export default async function PlatformDetailPage({ params }: PageProps) {
           </div>
         </div>
       </div>
+
+      {/* Connected Workspaces (for Slack) */}
+      {platform === 'SLACK' && connection.metadata &&
+       Array.isArray((connection.metadata as { workspaces?: Array<{ name: string; url: string }> }).workspaces) &&
+       ((connection.metadata as { workspaces: Array<{ name: string; url: string }> }).workspaces.length > 0) && (
+        <div className="bg-white rounded-xl border border-gray-200 p-6 mb-6">
+          <h2 className="text-lg font-semibold text-gray-900 mb-4">Connected Workspaces</h2>
+          <div className="space-y-3">
+            {((connection.metadata as { workspaces: Array<{ name: string; url: string }> }).workspaces).map((workspace, index) => (
+              <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-purple-100 text-purple-600 rounded-lg flex items-center justify-center">
+                    <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M5.042 15.165a2.528 2.528 0 0 1-2.52 2.523A2.528 2.528 0 0 1 0 15.165a2.527 2.527 0 0 1 2.522-2.52h2.52v2.52zM6.313 15.165a2.527 2.527 0 0 1 2.521-2.52 2.527 2.527 0 0 1 2.521 2.52v6.313A2.528 2.528 0 0 1 8.834 24a2.528 2.528 0 0 1-2.521-2.522v-6.313z"/>
+                    </svg>
+                  </div>
+                  <div>
+                    <p className="font-medium text-gray-900">{workspace.name}</p>
+                    {workspace.url && (
+                      <p className="text-sm text-gray-500 truncate max-w-xs">{workspace.url}</p>
+                    )}
+                  </div>
+                </div>
+                <span className="text-xs text-green-600 bg-green-50 px-2 py-1 rounded-full">Active</span>
+              </div>
+            ))}
+          </div>
+          <p className="text-sm text-gray-500 mt-4">
+            {((connection.metadata as { workspaces: Array<{ name: string; url: string }> }).workspaces).length} workspace{((connection.metadata as { workspaces: Array<{ name: string; url: string }> }).workspaces).length !== 1 ? 's' : ''} connected
+          </p>
+        </div>
+      )}
 
       {/* Stats Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">

@@ -9,10 +9,12 @@ import {
   PlatformType,
   PlatformConnectionStatus,
 } from '@/lib/platforms';
+import { getScrapeStats } from '@/lib/scrape-logs';
 
 /**
  * GET /api/platforms/connections
  * Get all platform connections for the current user
+ * Includes last scrape info from scrape_logs
  */
 export async function GET() {
   try {
@@ -22,7 +24,27 @@ export async function GET() {
     }
 
     const connections = await getConnectionsForUser(user.id);
-    return NextResponse.json({ connections });
+
+    // Enrich connections with scrape stats
+    const connectionsWithStats = await Promise.all(
+      connections.map(async (connection) => {
+        const stats = await getScrapeStats(connection.id);
+        return {
+          ...connection,
+          lastScrapeAt: stats.lastScrapeAt,
+          lastScrapeStatus: stats.lastScrapeStatus,
+          scrapeStats: {
+            totalScrapes: stats.totalScrapes,
+            successfulScrapes: stats.successfulScrapes,
+            failedScrapes: stats.failedScrapes,
+            totalMessagesFound: stats.totalMessagesFound,
+            totalLeadsCreated: stats.totalLeadsCreated,
+          },
+        };
+      })
+    );
+
+    return NextResponse.json({ connections: connectionsWithStats });
   } catch (error) {
     console.error('Error fetching platform connections:', error);
     return NextResponse.json(

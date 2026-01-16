@@ -20,7 +20,7 @@ export async function GET() {
   }
 
   try {
-    const sessions = getSessionsForUser(user.id);
+    const sessions = await getSessionsForUser(user.id);
     return NextResponse.json({ sessions });
   } catch (error) {
     console.error('Failed to fetch desktop sessions:', error);
@@ -72,7 +72,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const session = createSession(user.id, device_label, os_type);
+    const session = await createSession(user.id, device_label, os_type);
     return NextResponse.json({ session }, { status: 201 });
   } catch (error) {
     console.error('Failed to create desktop session:', error);

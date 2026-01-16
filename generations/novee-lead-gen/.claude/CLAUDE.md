@@ -37,6 +37,27 @@ All UI mockups are in `.claude/docs/design/mockups/`:
       
 When implementing UI, **always reference the mockups** to ensure visual consistency.
 
+## Desktop App Automation (MCP Server)
+
+The `@novee/mcp-desktop-automation` package provides an MCP server for automating the Electron desktop app.
+
+**Location**: `packages/mcp-desktop-automation/`
+
+**Build**: `pnpm --filter @novee/mcp-desktop-automation build`
+
+**Tools Available**:
+- `desktop_launch` - Launch the app, returns sessionId
+- `desktop_close` - Close the app
+- `desktop_snapshot` - Get UI element structure
+- `desktop_screenshot` - Take screenshot
+- `desktop_click` - Click elements
+- `desktop_type` - Type into inputs
+- `desktop_wait_for` - Wait for elements
+- `desktop_get_text` - Get element text
+- `desktop_evaluate` - Run JavaScript
+
+See `packages/mcp-desktop-automation/README.md` for detailed documentation.
+
 ## Known Gotchas
 
 1. **Slack Search Modal**: Must check if modal is open before interacting

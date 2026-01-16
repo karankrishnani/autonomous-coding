@@ -632,14 +632,253 @@ ipcMain.handle('get-slack-workspaces', async () => {
 });
 
 /**
+ * Search result item from Slack
+ */
+interface SearchResultItem {
+  message: string;
+  channel: string;
+  timestamp: string;
+  permalink: string;
+  sender?: string;
+  timestampUnix?: number;
+}
+
+/**
+ * Search result for a workspace
+ */
+interface SearchResult {
+  workspaceName: string;
+  workspaceUrl: string;
+  results: SearchResultItem[];
+}
+
+/**
+ * Search a single workspace for a keyword
+ */
+async function searchSlackWorkspace(
+  workspace: WorkspaceInfo,
+  keyword: string,
+  lastScrapeDate?: number
+): Promise<SearchResultItem[]> {
+  const results: SearchResultItem[] = [];
+
+  try {
+    const context = await getPlaywrightContext();
+    const page = await context.newPage();
+
+    console.log(`[Slack Search] Navigating to workspace: ${workspace.name}`);
+    await page.goto(workspace.url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+
+    // Wait for Slack interface to load
+    console.log('[Slack Search] Waiting for Slack interface...');
+    await page.waitForSelector('button[data-qa="top_nav_search"]', {
+      timeout: 15000,
+      state: 'visible',
+    });
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+
+    // Check for and clear any previous search
+    try {
+      const clearButton = page.getByRole('button', { name: 'Clear search' });
+      await clearButton.waitFor({ state: 'visible', timeout: 2000 });
+      await clearButton.click();
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      console.log('[Slack Search] Cleared previous search');
+    } catch {
+      // No previous search to clear
+    }
+
+    // Check if search modal is already open and close it
+    const modalWrapper = page.locator('div.c-search_modal__wrapper');
+    const closeButton = page.locator('button[data-qa="search_input_close"]');
+    const isModalOpen = await modalWrapper.isVisible().catch(() => false) ||
+                        await closeButton.isVisible().catch(() => false);
+
+    if (isModalOpen) {
+      console.log('[Slack Search] Closing existing search modal...');
+      await closeButton.click();
+      await modalWrapper.waitFor({ state: 'hidden', timeout: 5000 });
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+
+    // Open search modal
+    console.log('[Slack Search] Opening search modal...');
+    await page.getByRole('button', { name: 'Search', exact: true }).click();
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+
+    // Enter keyword
+    console.log(`[Slack Search] Searching for keyword: "${keyword}"`);
+    await page.getByRole('combobox', { name: 'Query' }).fill(keyword);
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+
+    // Execute search (try clicking suggestion first, then fallback to Enter)
+    try {
+      await page.getByLabel(`Search for: ${keyword}`)
+        .getByText(keyword)
+        .click({ timeout: 3000 });
+    } catch {
+      console.log('[Slack Search] Using Enter key to execute search');
+      await page.getByRole('combobox', { name: 'Query' }).press('Enter');
+    }
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+
+    // Wait for search results
+    console.log('[Slack Search] Waiting for search results...');
+    await page.waitForSelector('div[data-qa="search_view"]', {
+      timeout: 15000,
+      state: 'visible',
+    });
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+
+    // Check for empty state
+    const emptyState = page.locator('div[data-qa="empty_state_wrapper"]');
+    const isEmptyStateVisible = await emptyState.isVisible().catch(() => false);
+
+    if (isEmptyStateVisible) {
+      const emptyStateTitle = await emptyState.locator('.c-empty_state__title').textContent().catch(() => '');
+      if (emptyStateTitle && emptyStateTitle.includes('Nothing turned up')) {
+        console.log(`[Slack Search] No results found for keyword "${keyword}"`);
+        await page.close();
+        return [];
+      }
+    }
+
+    // Set sort order to "Newest" for incremental scraping
+    try {
+      const sortButton = page.getByRole('button', { name: /Sort:/i });
+      const isSortVisible = await sortButton.isVisible().catch(() => false);
+      if (isSortVisible) {
+        await sortButton.click();
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        await page.getByText('Newest').click();
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        console.log('[Slack Search] Sort order set to Newest');
+      }
+    } catch {
+      console.log('[Slack Search] Could not change sort order, using default');
+    }
+
+    // Extract results
+    const resultItems = await page.locator('div[role="listitem"].message__ziaO0').all();
+    console.log(`[Slack Search] Found ${resultItems.length} results`);
+
+    const maxResults = Math.min(10, resultItems.length);
+    for (let j = 0; j < maxResults; j++) {
+      try {
+        const resultItem = resultItems[j];
+
+        // Extract timestamp first to check if message is newer than last scrape
+        const permalinkElement = resultItem.locator('a.c-timestamp').first();
+        const timestampUnix = await permalinkElement.getAttribute('data-ts')
+          .then((ts: string | null) => ts ? parseFloat(ts) : undefined)
+          .catch((): undefined => undefined);
+
+        // Stop collecting if message is older than last scrape date (incremental scraping)
+        if (lastScrapeDate && timestampUnix && timestampUnix < lastScrapeDate) {
+          console.log(`[Slack Search] Message older than last scrape, stopping (${timestampUnix} < ${lastScrapeDate})`);
+          break;
+        }
+
+        // Expand all "Show more" buttons
+        const showMoreButtons = resultItem.locator('button.c-search__expand')
+          .filter({ hasText: /Show more/i });
+        const showMoreCount = await showMoreButtons.count();
+
+        for (let k = 0; k < showMoreCount; k++) {
+          try {
+            const button = showMoreButtons.nth(k);
+            await button.scrollIntoViewIfNeeded();
+            await button.click();
+            await new Promise((resolve) => setTimeout(resolve, 300));
+          } catch {
+            // Continue if button click fails
+          }
+        }
+        await new Promise((resolve) => setTimeout(resolve, 500));
+
+        // Extract message text
+        const messageElement = resultItem.locator('div[data-qa="message-text"]').first();
+        const message = await messageElement.textContent().catch(() => '') || '';
+
+        // Extract channel name
+        const channelElement = resultItem.locator('span[data-qa="inline_channel_entity__name"]').first();
+        const channel = await channelElement.textContent().catch(() => '') || 'Unknown';
+
+        // Extract timestamp
+        const timestampElement = resultItem.locator('span[data-qa="timestamp_label"]').first();
+        const timestamp = await timestampElement.textContent().catch(() => '') || '';
+
+        // Extract permalink
+        const permalink = await permalinkElement.getAttribute('href').catch(() => '') || '';
+
+        // Extract sender
+        const senderElement = resultItem.locator('button[data-qa="message_sender_name"]').first();
+        const sender = await senderElement.textContent().catch(() => undefined) ?? undefined;
+
+        results.push({
+          message,
+          channel,
+          timestamp,
+          permalink,
+          sender,
+          timestampUnix,
+        });
+
+        console.log(`[Slack Search] Extracted result ${j + 1}: "${message.substring(0, 50)}..." from #${channel}`);
+      } catch (error) {
+        console.warn(`[Slack Search] Error extracting result ${j + 1}:`, error);
+      }
+    }
+
+    // Close the page
+    await page.close();
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+
+    console.log(`[Slack Search] Workspace ${workspace.name} complete: ${results.length} results`);
+    return results;
+
+  } catch (error) {
+    console.error(`[Slack Search] Error searching workspace ${workspace.name}:`, error);
+    return results;
+  }
+}
+
+/**
  * Handle Slack keyword search
  * Searches all connected workspaces for matching messages
  */
-ipcMain.handle('search-slack-keywords', async (_event, keywords: string, lastScrapeDate?: number) => {
-  // TODO: Implement keyword search
-  // See: .claude/docs/spikes/SLACK_MESSAGE_SEARCH_SPEC.md
-  console.log('Searching Slack for keywords:', keywords, 'since:', lastScrapeDate);
-  return [];
+ipcMain.handle('search-slack-keywords', async (_event, keyword: string, lastScrapeDate?: number) => {
+  console.log(`[Slack Search] Searching for keyword: "${keyword}", since: ${lastScrapeDate || 'beginning'}`);
+
+  const session = loadSession();
+  if (!session) {
+    console.log('[Slack Search] No session, cannot search');
+    return [];
+  }
+
+  const workspaces = await getSlackWorkspaces();
+  if (workspaces.length === 0) {
+    console.log('[Slack Search] No workspaces connected');
+    return [];
+  }
+
+  const searchResults: SearchResult[] = [];
+
+  for (const workspace of workspaces) {
+    console.log(`[Slack Search] Searching workspace: ${workspace.name}`);
+    const results = await searchSlackWorkspace(workspace, keyword, lastScrapeDate);
+
+    searchResults.push({
+      workspaceName: workspace.name,
+      workspaceUrl: workspace.url,
+      results,
+    });
+  }
+
+  const totalResults = searchResults.reduce((sum, r) => sum + r.results.length, 0);
+  console.log(`[Slack Search] Search complete: ${totalResults} total results from ${workspaces.length} workspace(s)`);
+
+  return searchResults;
 });
 
 /**
@@ -731,7 +970,7 @@ async function scrapeWorkspace(
 
     // Create scrape log via API
     // First, we need to get the connection ID for this workspace
-    const connectionsResponse = await fetch(`${WEB_APP_URL}/api/platforms`, {
+    const connectionsResponse = await fetch(`${WEB_APP_URL}/api/platforms/connections`, {
       method: 'GET',
       headers: {
         Cookie: session.token,
@@ -792,26 +1031,56 @@ async function scrapeWorkspace(
       logId = logData.log.id;
     }
 
-    // Search for each keyword sequentially
-    // In production, this would use actual Playwright scraping
+    // Search for each keyword sequentially using real Playwright scraping
     for (const keyword of keywords) {
       console.log(`[Scrape] Searching workspace ${workspace.name} for keyword: "${keyword}"`);
       result.keywordsSearched.push(keyword);
 
-      // Simulate keyword search (in production, this calls actual Slack search)
-      // TODO: Replace with real Playwright search implementation
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      try {
+        // Use real Playwright search
+        const searchResults = await searchSlackWorkspace(workspace, keyword);
+        const messagesForKeyword = searchResults.length;
+        result.messagesFound += messagesForKeyword;
 
-      // Simulate finding some messages for this keyword
-      const messagesForKeyword = Math.floor(Math.random() * 8);
-      const leadsForKeyword = Math.floor(messagesForKeyword * 0.3);
+        console.log(`[Scrape] Found ${messagesForKeyword} messages for keyword "${keyword}"`);
 
-      result.messagesFound += messagesForKeyword;
-      result.leadsCreated += leadsForKeyword;
+        // Create leads for each matching message
+        for (const searchResult of searchResults) {
+          try {
+            const createLeadResponse = await fetch(`${WEB_APP_URL}/api/leads`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                Cookie: session.token,
+              },
+              body: JSON.stringify({
+                content: searchResult.message,
+                keywords: [keyword],
+                platform: 'SLACK',
+                channelName: searchResult.channel,
+                senderName: searchResult.sender || 'Unknown User',
+                sourceUrl: searchResult.permalink,
+              }),
+            });
 
-      console.log(
-        `[Scrape] Keyword "${keyword}": Found ${messagesForKeyword} messages, created ${leadsForKeyword} leads`
-      );
+            if (createLeadResponse.ok) {
+              result.leadsCreated++;
+              console.log(`[Scrape] Created lead from message in #${searchResult.channel}`);
+            } else {
+              const errorData = await createLeadResponse.json().catch(() => ({}));
+              console.warn(`[Scrape] Failed to create lead: ${JSON.stringify(errorData)}`);
+            }
+          } catch (leadError) {
+            console.warn(`[Scrape] Error creating lead:`, leadError);
+          }
+        }
+
+        console.log(
+          `[Scrape] Keyword "${keyword}": Found ${messagesForKeyword} messages, created ${result.leadsCreated} leads so far`
+        );
+      } catch (searchError) {
+        console.error(`[Scrape] Error searching for keyword "${keyword}":`, searchError);
+      }
     }
 
     result.success = true;
