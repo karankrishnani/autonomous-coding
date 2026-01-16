@@ -37,9 +37,6 @@ coverage/
 # Playwright cache
 playwright-cache/
 
-# Features database (managed by MCP server)
-features.db
-
 # Temporary files
 *.tmp
 *.temp
