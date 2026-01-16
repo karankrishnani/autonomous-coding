@@ -5,6 +5,7 @@ import {
   getConnectionByPlatform,
   createConnection,
   deleteConnection,
+  updatePlatformMetadata,
   PlatformType,
   PlatformConnectionStatus,
 } from '@/lib/platforms';
@@ -72,6 +73,65 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ connection }, { status: 201 });
   } catch (error) {
     console.error('Error creating platform connection:', error);
+    return NextResponse.json(
+      { error: 'Something went wrong. Please try again later.' },
+      { status: 500 }
+    );
+  }
+}
+
+/**
+ * PUT /api/platforms/connections
+ * Update a platform connection with metadata
+ * Body: { platform: string, metadata: object, status?: string }
+ */
+export async function PUT(request: NextRequest) {
+  try {
+    const user = await getSessionUser();
+    if (!user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const body = await request.json();
+    const { platform, metadata, status } = body;
+
+    // Validate platform
+    if (!platform || !['SLACK', 'LINKEDIN'].includes(platform)) {
+      return NextResponse.json(
+        { error: 'Invalid platform. Must be SLACK or LINKEDIN.' },
+        { status: 400 }
+      );
+    }
+
+    // Validate metadata
+    if (!metadata || typeof metadata !== 'object') {
+      return NextResponse.json(
+        { error: 'Metadata is required and must be an object.' },
+        { status: 400 }
+      );
+    }
+
+    // Update or create connection with metadata
+    const connection = await updatePlatformMetadata(
+      user.id,
+      platform as PlatformType,
+      metadata,
+      status as PlatformConnectionStatus | undefined
+    );
+
+    return NextResponse.json({
+      success: true,
+      connection: {
+        id: connection.id,
+        platform: connection.platform,
+        status: connection.status,
+        metadata: connection.metadata,
+        last_checked_at: connection.last_checked_at,
+        connected_at: connection.connected_at,
+      },
+    });
+  } catch (error) {
+    console.error('Error updating platform metadata:', error);
     return NextResponse.json(
       { error: 'Something went wrong. Please try again later.' },
       { status: 500 }

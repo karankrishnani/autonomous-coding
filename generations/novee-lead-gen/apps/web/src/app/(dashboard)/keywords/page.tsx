@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, ChangeEvent } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useToast } from '@/components/Toast';
@@ -282,6 +282,8 @@ export default function KeywordsPage() {
   };
 
   const [deletingKeyword, setDeletingKeyword] = useState<string | null>(null);
+  const [isImporting, setIsImporting] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleDeleteKeyword = async (keyword: string) => {
     if (deletingKeyword) {
@@ -325,6 +327,110 @@ export default function KeywordsPage() {
     { id: 'industry', label: 'Industry' },
   ];
 
+  // Handle CSV file import
+  const handleFileUpload = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Reset the file input so same file can be selected again
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+
+    // Validate file type
+    const validTypes = ['text/csv', 'application/vnd.ms-excel'];
+    const isCSV = validTypes.includes(file.type) || file.name.toLowerCase().endsWith('.csv');
+
+    if (!isCSV) {
+      setError('Invalid file type. Please upload a CSV file (.csv). Supported formats: CSV only.');
+      return;
+    }
+
+    // Validate file size (max 1MB)
+    const maxSize = 1 * 1024 * 1024; // 1MB
+    if (file.size > maxSize) {
+      setError('File is too large. Maximum file size is 1MB.');
+      return;
+    }
+
+    setIsImporting(true);
+    setError(null);
+
+    try {
+      const text = await file.text();
+      const lines = text.split(/\r?\n/).filter(line => line.trim());
+
+      if (lines.length === 0) {
+        setError('The CSV file is empty. Please upload a file with keywords.');
+        return;
+      }
+
+      // Parse CSV - support both comma and newline separated keywords
+      const importedKeywords: string[] = [];
+      const errors: string[] = [];
+
+      for (const line of lines) {
+        // Split by comma if present
+        const keywords = line.split(',').map(k => k.trim().replace(/^["']|["']$/g, ''));
+
+        for (const keyword of keywords) {
+          if (!keyword) continue;
+
+          // Validate keyword length
+          if (keyword.length < 2) {
+            errors.push(`"${keyword}" is too short (minimum 2 characters)`);
+            continue;
+          }
+          if (keyword.length > 50) {
+            errors.push(`"${keyword.substring(0, 20)}..." is too long (maximum 50 characters)`);
+            continue;
+          }
+
+          // Check for duplicates
+          if (importedKeywords.includes(keyword) || pendingKeywords.includes(keyword) || allKeywords.includes(keyword)) {
+            continue; // Skip duplicates silently
+          }
+
+          importedKeywords.push(keyword);
+        }
+      }
+
+      if (importedKeywords.length === 0) {
+        if (errors.length > 0) {
+          setError(`No valid keywords found. Issues: ${errors.slice(0, 3).join('; ')}${errors.length > 3 ? ` and ${errors.length - 3} more...` : ''}`);
+        } else {
+          setError('No new keywords found in the CSV file. All keywords may already be added.');
+        }
+        return;
+      }
+
+      // Add imported keywords to pending list
+      setPendingKeywords(prev => [...prev, ...importedKeywords]);
+
+      // Show success message
+      const successMsg = `Imported ${importedKeywords.length} keyword${importedKeywords.length === 1 ? '' : 's'} from CSV`;
+      if (errors.length > 0) {
+        addToast(`${successMsg}. ${errors.length} item${errors.length === 1 ? '' : 's'} skipped due to validation errors.`, 'warning');
+      } else {
+        addToast(successMsg, 'success');
+      }
+
+      // Show the form if it's hidden
+      if (!showForm && hasKeywords) {
+        setShowForm(true);
+      }
+    } catch (err) {
+      setError('Failed to read the CSV file. Please ensure it is a valid text file.');
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
+  // Trigger file input click
+  const handleImportClick = () => {
+    fileInputRef.current?.click();
+  };
+
   if (isLoading) {
     return (
       <div className="max-w-4xl">
@@ -358,12 +464,32 @@ export default function KeywordsPage() {
         </div>
       )}
 
+      {/* Hidden file input for CSV import */}
+      <input
+        type="file"
+        ref={fileInputRef}
+        onChange={handleFileUpload}
+        accept=".csv,text/csv,application/vnd.ms-excel"
+        className="hidden"
+        aria-label="Import keywords from CSV file"
+      />
+
       {/* Keywords Display */}
       {hasKeywords && !showForm && (
         <div className="card mb-6">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-semibold text-gray-900">Your Keywords</h2>
             <div className="flex gap-2">
+              <button
+                onClick={handleImportClick}
+                disabled={isImporting}
+                className="btn-tertiary text-sm flex items-center gap-1"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                </svg>
+                {isImporting ? 'Importing...' : 'Import CSV'}
+              </button>
               <button
                 onClick={() => setShowForm(true)}
                 className="btn-secondary text-sm"
@@ -479,13 +605,23 @@ export default function KeywordsPage() {
           )}
 
           {/* Actions */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <button
               onClick={handleSaveKeywords}
               disabled={pendingKeywords.length === 0 || isSaving}
               className="btn-primary"
             >
               {isSaving ? 'Saving...' : 'Save Keywords'}
+            </button>
+            <button
+              onClick={handleImportClick}
+              disabled={isImporting}
+              className="btn-tertiary flex items-center gap-1"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+              </svg>
+              {isImporting ? 'Importing...' : 'Import from CSV'}
             </button>
             {hasKeywords && (
               <button
