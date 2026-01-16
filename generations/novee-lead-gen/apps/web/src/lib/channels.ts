@@ -1,10 +1,7 @@
 /**
- * Channels data module for development.
- * In production, this would use Supabase.
+ * Channels data module using Supabase.
  */
-
-import * as fs from 'fs';
-import * as path from 'path';
+import { createClient } from './supabase/server';
 
 export type ChannelType = 'public' | 'private' | 'dm';
 
@@ -20,81 +17,41 @@ export interface Channel {
   updated_at: string;
 }
 
-// File path for persistent storage
-const DATA_DIR = path.join(process.cwd(), '.dev-data');
-const CHANNELS_FILE = path.join(DATA_DIR, 'channels.json');
-
-// In-memory store for channels
-let channels: Map<string, Channel> = new Map();
-let isLoaded = false;
-
-/**
- * Ensure data directory exists
- */
-function ensureDataDir() {
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-  }
-}
-
-/**
- * Load channels from file
- */
-function loadChannels() {
-  if (isLoaded) return;
-
-  try {
-    ensureDataDir();
-    if (fs.existsSync(CHANNELS_FILE)) {
-      const data = fs.readFileSync(CHANNELS_FILE, 'utf-8');
-      const channelsArray: Channel[] = JSON.parse(data);
-      channels = new Map(channelsArray.map(c => [c.id, c]));
-    }
-  } catch (error) {
-    console.error('Failed to load channels:', error);
-  }
-
-  isLoaded = true;
-}
-
-/**
- * Save channels to file
- */
-function saveChannels() {
-  try {
-    ensureDataDir();
-    const channelsArray = Array.from(channels.values());
-    fs.writeFileSync(CHANNELS_FILE, JSON.stringify(channelsArray, null, 2));
-  } catch (error) {
-    console.error('Failed to save channels:', error);
-  }
-}
-
-/**
- * Generate a simple UUID-like ID
- */
-function generateId(): string {
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-    const r = Math.random() * 16 | 0;
-    const v = c === 'x' ? r : (r & 0x3 | 0x8);
-    return v.toString(16);
-  });
-}
-
 /**
  * Get all channels for a platform connection
  */
 export async function getChannelsForConnection(connectionId: string): Promise<Channel[]> {
-  loadChannels();
-  return Array.from(channels.values()).filter(c => c.platform_connection_id === connectionId);
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from('channels')
+    .select('*')
+    .eq('platform_connection_id', connectionId)
+    .order('name', { ascending: true });
+
+  if (error) {
+    console.error('Failed to get channels:', error);
+    return [];
+  }
+
+  return (data || []) as Channel[];
 }
 
 /**
  * Get a channel by ID
  */
 export async function getChannelById(channelId: string): Promise<Channel | null> {
-  loadChannels();
-  return channels.get(channelId) || null;
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from('channels')
+    .select('*')
+    .eq('id', channelId)
+    .single();
+
+  if (error) {
+    return null;
+  }
+
+  return data as Channel;
 }
 
 /**
@@ -106,23 +63,24 @@ export async function createChannel(
   type: ChannelType = 'public',
   metadata: Record<string, unknown> = {}
 ): Promise<Channel> {
-  loadChannels();
-  const now = new Date().toISOString();
-  const channel: Channel = {
-    id: generateId(),
-    platform_connection_id: connectionId,
-    name,
-    type,
-    metadata,
-    last_run_at: null,
-    next_run_at: null,
-    created_at: now,
-    updated_at: now,
-  };
+  const supabase = await createClient();
 
-  channels.set(channel.id, channel);
-  saveChannels();
-  return channel;
+  const { data, error } = await supabase
+    .from('channels')
+    .insert({
+      platform_connection_id: connectionId,
+      name,
+      type,
+      metadata,
+    })
+    .select()
+    .single();
+
+  if (error) {
+    throw new Error(`Failed to create channel: ${error.message}`);
+  }
+
+  return data as Channel;
 }
 
 /**
@@ -132,29 +90,25 @@ export async function createChannelsBulk(
   connectionId: string,
   channelData: Array<{ name: string; type?: ChannelType; metadata?: Record<string, unknown> }>
 ): Promise<Channel[]> {
-  loadChannels();
-  const now = new Date().toISOString();
-  const createdChannels: Channel[] = [];
+  const supabase = await createClient();
 
-  for (const data of channelData) {
-    const channel: Channel = {
-      id: generateId(),
-      platform_connection_id: connectionId,
-      name: data.name,
-      type: data.type || 'public',
-      metadata: data.metadata || {},
-      last_run_at: null,
-      next_run_at: null,
-      created_at: now,
-      updated_at: now,
-    };
+  const insertData = channelData.map(data => ({
+    platform_connection_id: connectionId,
+    name: data.name,
+    type: data.type || 'public',
+    metadata: data.metadata || {},
+  }));
 
-    channels.set(channel.id, channel);
-    createdChannels.push(channel);
+  const { data, error } = await supabase
+    .from('channels')
+    .insert(insertData)
+    .select();
+
+  if (error) {
+    throw new Error(`Failed to create channels: ${error.message}`);
   }
 
-  saveChannels();
-  return createdChannels;
+  return (data || []) as Channel[];
 }
 
 /**
@@ -164,36 +118,57 @@ export async function updateChannel(
   channelId: string,
   updates: Partial<Pick<Channel, 'name' | 'type' | 'metadata' | 'last_run_at' | 'next_run_at'>>
 ): Promise<Channel | null> {
-  loadChannels();
-  const channel = channels.get(channelId);
-  if (!channel) {
+  const supabase = await createClient();
+
+  // For metadata, we need to merge with existing
+  let updateData: Record<string, unknown> = {};
+
+  if (updates.name !== undefined) updateData.name = updates.name;
+  if (updates.type !== undefined) updateData.type = updates.type;
+  if (updates.last_run_at !== undefined) updateData.last_run_at = updates.last_run_at;
+  if (updates.next_run_at !== undefined) updateData.next_run_at = updates.next_run_at;
+
+  // If metadata is being updated, merge with existing
+  if (updates.metadata !== undefined) {
+    const existing = await getChannelById(channelId);
+    if (existing) {
+      updateData.metadata = { ...existing.metadata, ...updates.metadata };
+    } else {
+      updateData.metadata = updates.metadata;
+    }
+  }
+
+  const { data, error } = await supabase
+    .from('channels')
+    .update(updateData)
+    .eq('id', channelId)
+    .select()
+    .single();
+
+  if (error) {
+    console.error('Failed to update channel:', error);
     return null;
   }
 
-  const now = new Date().toISOString();
-  if (updates.name !== undefined) channel.name = updates.name;
-  if (updates.type !== undefined) channel.type = updates.type;
-  if (updates.metadata !== undefined) channel.metadata = { ...channel.metadata, ...updates.metadata };
-  if (updates.last_run_at !== undefined) channel.last_run_at = updates.last_run_at;
-  if (updates.next_run_at !== undefined) channel.next_run_at = updates.next_run_at;
-  channel.updated_at = now;
-
-  channels.set(channelId, channel);
-  saveChannels();
-  return channel;
+  return data as Channel;
 }
 
 /**
  * Delete a channel
  */
 export async function deleteChannel(channelId: string): Promise<boolean> {
-  loadChannels();
-  if (!channels.has(channelId)) {
+  const supabase = await createClient();
+
+  const { error } = await supabase
+    .from('channels')
+    .delete()
+    .eq('id', channelId);
+
+  if (error) {
+    console.error('Failed to delete channel:', error);
     return false;
   }
 
-  channels.delete(channelId);
-  saveChannels();
   return true;
 }
 
@@ -201,19 +176,25 @@ export async function deleteChannel(channelId: string): Promise<boolean> {
  * Delete all channels for a platform connection (cascade delete)
  */
 export async function deleteChannelsForConnection(connectionId: string): Promise<number> {
-  loadChannels();
-  const connectionChannels = Array.from(channels.values()).filter(
-    c => c.platform_connection_id === connectionId
-  );
-  let deletedCount = 0;
+  const supabase = await createClient();
 
-  for (const channel of connectionChannels) {
-    channels.delete(channel.id);
-    deletedCount++;
+  // First count existing channels
+  const channels = await getChannelsForConnection(connectionId);
+  const count = channels.length;
+
+  if (count === 0) {
+    return 0;
   }
 
-  if (deletedCount > 0) {
-    saveChannels();
+  const { error } = await supabase
+    .from('channels')
+    .delete()
+    .eq('platform_connection_id', connectionId);
+
+  if (error) {
+    console.error('Failed to delete channels:', error);
+    return 0;
   }
-  return deletedCount;
+
+  return count;
 }

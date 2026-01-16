@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createUser } from '@/lib/auth';
+import { createUserForRoute } from '@/lib/auth';
 import { trackOnboardingEvent } from '@/lib/onboarding';
 
 export async function POST(request: NextRequest) {
@@ -48,8 +48,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Create user (use trimmed name)
-    const { user, error } = await createUser(email, password, trimmedName);
+    // Create user - use route handler version that captures cookies
+    const { user, error, applyToResponse } = await createUserForRoute(email, password, trimmedName);
 
     if (error) {
       return NextResponse.json({ error }, { status: 400 });
@@ -73,28 +73,13 @@ export async function POST(request: NextRequest) {
       console.error('Failed to track onboarding event:', trackError);
     }
 
-    // Create session by setting cookie in response
-    // Include issued_at timestamp for expiration checking
-    const sessionPayload = {
-      ...user,
-      issued_at: new Date().toISOString(),
-    };
-    const sessionData = Buffer.from(JSON.stringify(sessionPayload)).toString('base64');
-
+    // Create response and apply Supabase session cookies
     const response = NextResponse.json({
       user,
       message: 'Account created successfully',
     });
 
-    response.cookies.set('novee_session', sessionData, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 60 * 60 * 24 * 7, // 7 days
-      path: '/',
-    });
-
-    return response;
+    return applyToResponse(response);
   } catch (error) {
     // Log error details server-side only (not exposed to client)
     console.error('Signup error:', error);

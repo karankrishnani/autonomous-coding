@@ -9,12 +9,18 @@
     "lint": "turbo run lint",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
     "clean": "turbo run clean && rm -rf node_modules",
-    "typecheck": "turbo run typecheck"
+    "typecheck": "turbo run typecheck",
+    "db:start": "supabase start",
+    "db:stop": "supabase stop",
+    "db:reset": "supabase db reset",
+    "db:status": "supabase status",
+    "db:types": "supabase gen types typescript --local > packages/shared/src/database.types.ts"
   },
   "devDependencies": {
     "@types/node": "^20.10.0",
     "eslint": "^8.55.0",
     "prettier": "^3.1.1",
+    "supabase": "^2.72.7",
     "turbo": "^1.11.2",
     "typescript": "^5.3.2"
   },

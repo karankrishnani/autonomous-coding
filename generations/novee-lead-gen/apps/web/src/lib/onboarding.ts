@@ -1,9 +1,7 @@
 /**
- * Onboarding events module for tracking user progress.
- * In production, this would use Supabase.
+ * Onboarding events module using Supabase.
  */
-
-import { cookies } from 'next/headers';
+import { createClient, createServiceRoleClient } from './supabase/server';
 
 export type OnboardingEventType =
   | 'ACCOUNT_CREATED'
@@ -25,55 +23,9 @@ export interface OnboardingEvent {
   created_at: string;
 }
 
-// Cookie name for onboarding events storage
-const ONBOARDING_COOKIE = 'novee_dev_onboarding';
-
-/**
- * Generate a simple UUID-like ID
- */
-function generateId(): string {
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
-    const r = (Math.random() * 16) | 0;
-    const v = c === 'x' ? r : (r & 0x3) | 0x8;
-    return v.toString(16);
-  });
-}
-
-/**
- * Load onboarding events from cookie
- */
-async function loadEventsFromCookie(): Promise<OnboardingEvent[]> {
-  try {
-    const cookieStore = await cookies();
-    const cookie = cookieStore.get(ONBOARDING_COOKIE)?.value;
-    if (!cookie) return [];
-    return JSON.parse(Buffer.from(cookie, 'base64').toString('utf-8'));
-  } catch {
-    return [];
-  }
-}
-
-/**
- * Save onboarding events to cookie
- */
-async function saveEventsToCookie(events: OnboardingEvent[]): Promise<void> {
-  try {
-    const cookieStore = await cookies();
-    const data = Buffer.from(JSON.stringify(events)).toString('base64');
-    cookieStore.set(ONBOARDING_COOKIE, data, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 60 * 60 * 24 * 30, // 30 days
-      path: '/',
-    });
-  } catch (error) {
-    console.error('Failed to save onboarding events to cookie:', error);
-  }
-}
-
 /**
  * Track an onboarding event for a user
+ * Uses service role client to bypass RLS since this is called before session is established
  */
 export async function trackOnboardingEvent(
   userId: string,
@@ -81,31 +33,46 @@ export async function trackOnboardingEvent(
   metadata: Record<string, unknown> = {},
   platformConnectionId?: string
 ): Promise<OnboardingEvent> {
-  const allEvents = await loadEventsFromCookie();
+  // Use service role client to bypass RLS - this is needed because
+  // onboarding events are tracked during signup/login before the session cookie is set
+  const supabase = await createServiceRoleClient();
 
-  const now = new Date().toISOString();
-  const newEvent: OnboardingEvent = {
-    id: generateId(),
-    user_id: userId,
-    event,
-    platform_connection_id: platformConnectionId || null,
-    occurred_at: now,
-    metadata,
-    created_at: now,
-  };
+  const { data, error } = await supabase
+    .from('onboarding_events')
+    .insert({
+      user_id: userId,
+      event,
+      platform_connection_id: platformConnectionId || null,
+      metadata,
+    })
+    .select()
+    .single();
 
-  allEvents.push(newEvent);
-  await saveEventsToCookie(allEvents);
+  if (error) {
+    throw new Error(`Failed to track onboarding event: ${error.message}`);
+  }
 
-  return newEvent;
+  return data as OnboardingEvent;
 }
 
 /**
  * Get all onboarding events for a user
  */
 export async function getOnboardingEventsForUser(userId: string): Promise<OnboardingEvent[]> {
-  const allEvents = await loadEventsFromCookie();
-  return allEvents.filter((e) => e.user_id === userId);
+  const supabase = await createClient();
+
+  const { data, error } = await supabase
+    .from('onboarding_events')
+    .select('*')
+    .eq('user_id', userId)
+    .order('occurred_at', { ascending: true });
+
+  if (error) {
+    console.error('Failed to get onboarding events:', error);
+    return [];
+  }
+
+  return (data || []) as OnboardingEvent[];
 }
 
 /**
@@ -115,8 +82,20 @@ export async function hasCompletedEvent(
   userId: string,
   event: OnboardingEventType
 ): Promise<boolean> {
-  const events = await getOnboardingEventsForUser(userId);
-  return events.some((e) => e.event === event);
+  const supabase = await createClient();
+
+  const { count, error } = await supabase
+    .from('onboarding_events')
+    .select('*', { count: 'exact', head: true })
+    .eq('user_id', userId)
+    .eq('event', event);
+
+  if (error) {
+    console.error('Failed to check event completion:', error);
+    return false;
+  }
+
+  return (count || 0) > 0;
 }
 
 /**

@@ -1,9 +1,7 @@
 /**
- * Lead interactions tracking module.
- * Tracks user actions on leads: INTERESTED, NOT_INTERESTED, MARKED_LATER, OPENED_SOURCE
+ * Lead interactions tracking module using Supabase.
  */
-
-import { cookies } from 'next/headers';
+import { createClient } from './supabase/server';
 
 export type LeadInteractionAction = 'INTERESTED' | 'NOT_INTERESTED' | 'MARKED_LATER' | 'OPENED_SOURCE';
 
@@ -15,53 +13,6 @@ export interface LeadInteraction {
   created_at: string;
 }
 
-// Cookie name for lead interactions storage
-const INTERACTIONS_COOKIE = 'novee_dev_lead_interactions';
-
-/**
- * Generate a simple UUID-like ID
- */
-function generateId(): string {
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
-    const r = (Math.random() * 16) | 0;
-    const v = c === 'x' ? r : (r & 0x3) | 0x8;
-    return v.toString(16);
-  });
-}
-
-/**
- * Load lead interactions from cookie
- */
-async function loadInteractionsFromCookie(): Promise<LeadInteraction[]> {
-  try {
-    const cookieStore = await cookies();
-    const cookie = cookieStore.get(INTERACTIONS_COOKIE)?.value;
-    if (!cookie) return [];
-    return JSON.parse(Buffer.from(cookie, 'base64').toString('utf-8'));
-  } catch {
-    return [];
-  }
-}
-
-/**
- * Save lead interactions to cookie
- */
-async function saveInteractionsToCookie(interactions: LeadInteraction[]): Promise<void> {
-  try {
-    const cookieStore = await cookies();
-    const data = Buffer.from(JSON.stringify(interactions)).toString('base64');
-    cookieStore.set(INTERACTIONS_COOKIE, data, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 60 * 60 * 24 * 30, // 30 days
-      path: '/',
-    });
-  } catch (error) {
-    console.error('Failed to save lead interactions to cookie:', error);
-  }
-}
-
 /**
  * Track a lead interaction
  */
@@ -70,44 +21,71 @@ export async function trackLeadInteraction(
   userId: string,
   action: LeadInteractionAction
 ): Promise<LeadInteraction> {
-  const allInteractions = await loadInteractionsFromCookie();
+  const supabase = await createClient();
 
-  const now = new Date().toISOString();
-  const newInteraction: LeadInteraction = {
-    id: generateId(),
-    lead_id: leadId,
-    user_id: userId,
-    action,
-    created_at: now,
-  };
+  const { data, error } = await supabase
+    .from('lead_interactions')
+    .insert({
+      lead_id: leadId,
+      user_id: userId,
+      action,
+    })
+    .select()
+    .single();
 
-  allInteractions.push(newInteraction);
-  await saveInteractionsToCookie(allInteractions);
+  if (error) {
+    throw new Error(`Failed to track interaction: ${error.message}`);
+  }
 
-  return newInteraction;
+  return data as LeadInteraction;
 }
 
 /**
  * Get all interactions for a lead
  */
 export async function getInteractionsForLead(leadId: string, userId: string): Promise<LeadInteraction[]> {
-  const allInteractions = await loadInteractionsFromCookie();
-  return allInteractions.filter((i) => i.lead_id === leadId && i.user_id === userId);
+  const supabase = await createClient();
+
+  const { data, error } = await supabase
+    .from('lead_interactions')
+    .select('*')
+    .eq('lead_id', leadId)
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    console.error('Failed to get interactions:', error);
+    return [];
+  }
+
+  return (data || []) as LeadInteraction[];
 }
 
 /**
  * Get all interactions for a user
  */
 export async function getInteractionsForUser(userId: string): Promise<LeadInteraction[]> {
-  const allInteractions = await loadInteractionsFromCookie();
-  return allInteractions.filter((i) => i.user_id === userId);
+  const supabase = await createClient();
+
+  const { data, error } = await supabase
+    .from('lead_interactions')
+    .select('*')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    console.error('Failed to get interactions:', error);
+    return [];
+  }
+
+  return (data || []) as LeadInteraction[];
 }
 
 /**
  * Get interaction counts by action for a user
  */
 export async function getInteractionCountsByAction(userId: string): Promise<Record<LeadInteractionAction, number>> {
-  const interactions = await getInteractionsForUser(userId);
+  const supabase = await createClient();
 
   const counts: Record<LeadInteractionAction, number> = {
     INTERESTED: 0,
@@ -116,8 +94,16 @@ export async function getInteractionCountsByAction(userId: string): Promise<Reco
     OPENED_SOURCE: 0,
   };
 
-  for (const interaction of interactions) {
-    counts[interaction.action]++;
+  const actions: LeadInteractionAction[] = ['INTERESTED', 'NOT_INTERESTED', 'MARKED_LATER', 'OPENED_SOURCE'];
+
+  for (const action of actions) {
+    const { count } = await supabase
+      .from('lead_interactions')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', userId)
+      .eq('action', action);
+
+    counts[action] = count || 0;
   }
 
   return counts;

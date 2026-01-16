@@ -1,10 +1,10 @@
 /**
- * Platform connections data module for development.
- * In production, this would use Supabase.
+ * Platform connections data module using Supabase.
+ *
+ * NOTE: TypeScript errors will resolve after generating types:
+ *   pnpm db:start && pnpm db:types
  */
-
-import * as fs from 'fs';
-import * as path from 'path';
+import { createClient, createServiceRoleClient } from './supabase/server';
 
 export type PlatformType = 'SLACK' | 'LINKEDIN';
 export type PlatformConnectionStatus = 'PENDING' | 'CONNECTED' | 'DEGRADED' | 'DISCONNECTED';
@@ -22,95 +22,61 @@ export interface PlatformConnection {
   updated_at: string;
 }
 
-// File path for persistent storage
-const DATA_DIR = path.join(process.cwd(), '.dev-data');
-const CONNECTIONS_FILE = path.join(DATA_DIR, 'connections.json');
-
-// In-memory store for platform connections
-let connections: Map<string, PlatformConnection> = new Map();
-let isLoaded = false;
-
-/**
- * Ensure data directory exists
- */
-function ensureDataDir() {
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-  }
-}
-
-/**
- * Load connections from file
- */
-function loadConnections() {
-  if (isLoaded) return;
-
-  try {
-    ensureDataDir();
-    if (fs.existsSync(CONNECTIONS_FILE)) {
-      const data = fs.readFileSync(CONNECTIONS_FILE, 'utf-8');
-      const connectionsArray: PlatformConnection[] = JSON.parse(data);
-      connections = new Map(connectionsArray.map(c => [c.id, c]));
-    }
-  } catch (error) {
-    console.error('Failed to load connections:', error);
-  }
-
-  isLoaded = true;
-}
-
-/**
- * Save connections to file
- */
-function saveConnections() {
-  try {
-    ensureDataDir();
-    const connectionsArray = Array.from(connections.values());
-    fs.writeFileSync(CONNECTIONS_FILE, JSON.stringify(connectionsArray, null, 2));
-  } catch (error) {
-    console.error('Failed to save connections:', error);
-  }
-}
-
-/**
- * Generate a simple UUID-like ID
- */
-function generateId(): string {
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-    const r = Math.random() * 16 | 0;
-    const v = c === 'x' ? r : (r & 0x3 | 0x8);
-    return v.toString(16);
-  });
-}
-
 /**
  * Get all platform connections for a user
  */
 export async function getConnectionsForUser(userId: string): Promise<PlatformConnection[]> {
-  loadConnections();
-  return Array.from(connections.values()).filter(c => c.user_id === userId);
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from('platform_connections')
+    .select('*')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    console.error('Failed to get connections:', error);
+    return [];
+  }
+
+  return (data || []) as PlatformConnection[];
 }
 
 /**
  * Get a platform connection by ID for a user
  */
 export async function getConnectionById(userId: string, connectionId: string): Promise<PlatformConnection | null> {
-  loadConnections();
-  const connection = connections.get(connectionId);
-  if (!connection || connection.user_id !== userId) {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from('platform_connections')
+    .select('*')
+    .eq('id', connectionId)
+    .eq('user_id', userId)
+    .single();
+
+  if (error) {
     return null;
   }
-  return connection;
+
+  return data as PlatformConnection;
 }
 
 /**
  * Get a platform connection by platform type for a user
  */
 export async function getConnectionByPlatform(userId: string, platform: PlatformType): Promise<PlatformConnection | null> {
-  loadConnections();
-  const allConnections = Array.from(connections.values());
-  const connection = allConnections.find(c => c.platform === platform && c.user_id === userId);
-  return connection || null;
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from('platform_connections')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('platform', platform)
+    .single();
+
+  if (error) {
+    return null;
+  }
+
+  return data as PlatformConnection;
 }
 
 /**
@@ -121,24 +87,26 @@ export async function createConnection(
   platform: PlatformType,
   status: PlatformConnectionStatus = 'PENDING'
 ): Promise<PlatformConnection> {
-  loadConnections();
+  const supabase = await createClient();
   const now = new Date().toISOString();
-  const connection: PlatformConnection = {
-    id: generateId(),
-    user_id: userId,
-    platform,
-    status,
-    metadata: {},
-    last_checked_at: null,
-    last_error: null,
-    connected_at: status === 'CONNECTED' ? now : null,
-    created_at: now,
-    updated_at: now,
-  };
 
-  connections.set(connection.id, connection);
-  saveConnections();
-  return connection;
+  const { data, error } = await supabase
+    .from('platform_connections')
+    .insert({
+      user_id: userId,
+      platform,
+      status,
+      metadata: {},
+      connected_at: status === 'CONNECTED' ? now : null,
+    })
+    .select()
+    .single();
+
+  if (error) {
+    throw new Error(`Failed to create connection: ${error.message}`);
+  }
+
+  return data as PlatformConnection;
 }
 
 /**
@@ -150,52 +118,77 @@ export async function updateConnectionStatus(
   status: PlatformConnectionStatus,
   lastError?: string
 ): Promise<PlatformConnection | null> {
-  loadConnections();
-  const connection = connections.get(connectionId);
-  if (!connection || connection.user_id !== userId) {
+  const supabase = await createClient();
+  const now = new Date().toISOString();
+
+  // First check if this connection belongs to the user
+  const existing = await getConnectionById(userId, connectionId);
+  if (!existing) {
     return null;
   }
 
-  const now = new Date().toISOString();
-  connection.status = status;
-  connection.last_checked_at = now;
-  connection.last_error = lastError || null;
-  if (status === 'CONNECTED' && !connection.connected_at) {
-    connection.connected_at = now;
-  }
-  connection.updated_at = now;
+  const updateData: Record<string, unknown> = {
+    status,
+    last_checked_at: now,
+    last_error: lastError || null,
+  };
 
-  connections.set(connectionId, connection);
-  saveConnections();
-  return connection;
+  // Set connected_at if connecting for the first time
+  if (status === 'CONNECTED' && !existing.connected_at) {
+    updateData.connected_at = now;
+  }
+
+  const { data, error } = await supabase
+    .from('platform_connections')
+    .update(updateData)
+    .eq('id', connectionId)
+    .eq('user_id', userId)
+    .select()
+    .single();
+
+  if (error) {
+    console.error('Failed to update connection status:', error);
+    return null;
+  }
+
+  return data as PlatformConnection;
 }
 
 /**
  * Update a platform connection's metadata
- * Used to store workspace URLs, channel info, etc.
  */
 export async function updateConnectionMetadata(
   userId: string,
   connectionId: string,
   metadata: Record<string, unknown>
 ): Promise<PlatformConnection | null> {
-  loadConnections();
-  const connection = connections.get(connectionId);
-  if (!connection || connection.user_id !== userId) {
+  const supabase = await createClient();
+
+  // First get existing metadata to merge
+  const existing = await getConnectionById(userId, connectionId);
+  if (!existing) {
     return null;
   }
 
-  const now = new Date().toISOString();
-  // Merge new metadata with existing
-  connection.metadata = {
-    ...connection.metadata,
+  const mergedMetadata = {
+    ...existing.metadata,
     ...metadata,
   };
-  connection.updated_at = now;
 
-  connections.set(connectionId, connection);
-  saveConnections();
-  return connection;
+  const { data, error } = await supabase
+    .from('platform_connections')
+    .update({ metadata: mergedMetadata })
+    .eq('id', connectionId)
+    .eq('user_id', userId)
+    .select()
+    .single();
+
+  if (error) {
+    console.error('Failed to update connection metadata:', error);
+    return null;
+  }
+
+  return data as PlatformConnection;
 }
 
 /**
@@ -208,120 +201,134 @@ export async function updatePlatformMetadata(
   metadata: Record<string, unknown>,
   status?: PlatformConnectionStatus
 ): Promise<PlatformConnection> {
-  loadConnections();
-
-  // Find existing connection
-  let connection = Array.from(connections.values()).find(
-    c => c.platform === platform && c.user_id === userId
-  );
-
+  // Use service role client to bypass RLS for server-side operations
+  const supabase = await createServiceRoleClient();
   const now = new Date().toISOString();
 
-  if (!connection) {
+  // Find existing connection
+  const existing = await getConnectionByPlatform(userId, platform);
+
+  if (!existing) {
     // Create new connection with metadata
-    connection = {
-      id: generateId(),
-      user_id: userId,
-      platform,
-      status: status || 'CONNECTED',
-      metadata,
-      last_checked_at: now,
-      last_error: null,
-      connected_at: now,
-      created_at: now,
-      updated_at: now,
-    };
-  } else {
-    // Update existing connection
-    connection.metadata = {
-      ...connection.metadata,
-      ...metadata,
-    };
-    if (status) {
-      connection.status = status;
+    const { data, error } = await supabase
+      .from('platform_connections')
+      .insert({
+        user_id: userId,
+        platform,
+        status: status || 'CONNECTED',
+        metadata,
+        last_checked_at: now,
+        connected_at: now,
+      })
+      .select()
+      .single();
+
+    if (error) {
+      throw new Error(`Failed to create connection: ${error.message}`);
     }
-    connection.last_checked_at = now;
-    connection.updated_at = now;
+
+    return data as PlatformConnection;
   }
 
-  connections.set(connection.id, connection);
-  saveConnections();
-  return connection;
+  // Update existing connection
+  const mergedMetadata = {
+    ...existing.metadata,
+    ...metadata,
+  };
+
+  const updateData: Record<string, unknown> = {
+    metadata: mergedMetadata,
+    last_checked_at: now,
+  };
+
+  if (status) {
+    updateData.status = status;
+  }
+
+  const { data, error } = await supabase
+    .from('platform_connections')
+    .update(updateData)
+    .eq('id', existing.id)
+    .select()
+    .single();
+
+  if (error) {
+    throw new Error(`Failed to update connection: ${error.message}`);
+  }
+
+  return data as PlatformConnection;
 }
 
 /**
  * Delete a platform connection
  */
 export async function deleteConnection(userId: string, connectionId: string): Promise<boolean> {
-  loadConnections();
-  const connection = connections.get(connectionId);
-  if (!connection || connection.user_id !== userId) {
+  const supabase = await createClient();
+
+  const { error } = await supabase
+    .from('platform_connections')
+    .delete()
+    .eq('id', connectionId)
+    .eq('user_id', userId);
+
+  if (error) {
+    console.error('Failed to delete connection:', error);
     return false;
   }
 
-  connections.delete(connectionId);
-  saveConnections();
   return true;
 }
 
 /**
  * Delete all platform connections for a user
- * Used for account deletion cascade
- * Returns the number of connections deleted
  */
 export async function deleteAllConnectionsForUser(userId: string): Promise<number> {
-  loadConnections();
-  const userConnections = Array.from(connections.values()).filter(c => c.user_id === userId);
-  let deletedCount = 0;
+  const supabase = await createClient();
 
-  for (const connection of userConnections) {
-    connections.delete(connection.id);
-    deletedCount++;
+  // First count existing connections
+  const connections = await getConnectionsForUser(userId);
+  const count = connections.length;
+
+  if (count === 0) {
+    return 0;
   }
 
-  if (deletedCount > 0) {
-    saveConnections();
+  const { error } = await supabase
+    .from('platform_connections')
+    .delete()
+    .eq('user_id', userId);
+
+  if (error) {
+    console.error('Failed to delete connections:', error);
+    return 0;
   }
-  return deletedCount;
+
+  return count;
 }
 
 /**
  * Log a scraper error for a platform connection
- * Updates the connection's last_error field and sets status to DEGRADED
  */
 export async function logScraperError(
   userId: string,
   platform: PlatformType,
   errorMessage: string
 ): Promise<PlatformConnection | null> {
-  loadConnections();
-
   // Find the connection for this platform
-  const connection = Array.from(connections.values()).find(
-    c => c.platform === platform && c.user_id === userId
-  );
+  const connection = await getConnectionByPlatform(userId, platform);
 
   if (!connection) {
-    // Create a new connection if it doesn't exist
-    const newConnection = await createConnection(userId, platform, 'DEGRADED');
-    const now = new Date().toISOString();
-    newConnection.last_error = errorMessage;
-    newConnection.last_checked_at = now;
-    connections.set(newConnection.id, newConnection);
-    saveConnections();
-    return newConnection;
+    // Create a new connection in degraded state
+    try {
+      const newConnection = await createConnection(userId, platform, 'DEGRADED');
+      return await updateConnectionStatus(userId, newConnection.id, 'DEGRADED', errorMessage);
+    } catch {
+      return null;
+    }
   }
 
   // Update existing connection with error
-  const now = new Date().toISOString();
-  connection.status = 'DEGRADED';
-  connection.last_error = errorMessage;
-  connection.last_checked_at = now;
-  connection.updated_at = now;
-
-  connections.set(connection.id, connection);
-  saveConnections();
-  return connection;
+  return await updateConnectionStatus(userId, connection.id, 'DEGRADED', errorMessage);
 }
 
 /**

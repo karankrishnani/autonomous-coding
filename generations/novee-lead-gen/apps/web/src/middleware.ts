@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
+import { updateSession } from './lib/supabase/middleware';
 
 // Routes that require authentication
 const protectedRoutes = [
@@ -14,30 +15,12 @@ const protectedRoutes = [
 // Routes that are only for unauthenticated users
 const authRoutes = ['/login', '/signup', '/forgot-password'];
 
-/**
- * Validate session cookie - checks if it's a valid base64 encoded user object
- */
-function isValidSession(sessionValue: string | undefined): boolean {
-  if (!sessionValue) return false;
-
-  try {
-    // Decode base64 and parse JSON
-    const decoded = Buffer.from(sessionValue, 'base64').toString('utf-8');
-    const user = JSON.parse(decoded);
-
-    // Check for required user fields
-    return !!(user && user.id && user.email && user.name);
-  } catch {
-    return false;
-  }
-}
-
-export function middleware(request: NextRequest) {
+export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // Get session cookie and validate it
-  const sessionCookie = request.cookies.get('novee_session');
-  const isAuthenticated = isValidSession(sessionCookie?.value);
+  // Get user from Supabase session
+  const { user, supabaseResponse } = await updateSession(request);
+  const isAuthenticated = !!user;
 
   // Check if the path is a protected route
   const isProtectedRoute = protectedRoutes.some(
@@ -65,7 +48,7 @@ export function middleware(request: NextRequest) {
     return NextResponse.redirect(new URL('/dashboard', request.url));
   }
 
-  return NextResponse.next();
+  return supabaseResponse;
 }
 
 export const config = {

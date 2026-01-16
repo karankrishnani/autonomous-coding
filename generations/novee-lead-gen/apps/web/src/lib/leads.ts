@@ -1,10 +1,7 @@
 /**
- * Leads data management for development.
- * In production, this would use Supabase.
- * For development, we use an in-memory store with cookie persistence.
+ * Leads data management using Supabase.
  */
-
-import { cookies } from 'next/headers';
+import { createClient } from './supabase/server';
 
 export type LeadStatus = 'NEW' | 'VIEWED' | 'INTERESTED' | 'NOT_INTERESTED' | 'MARKED_LATER' | 'ARCHIVED';
 
@@ -17,7 +14,7 @@ export interface Lead {
   first_viewed_at: string | null;
   created_at: string;
   updated_at: string;
-  // Embedded post data for development
+  // Embedded post data
   post?: {
     content: string;
     source_url: string;
@@ -26,82 +23,6 @@ export interface Lead {
     timestamp: string;
     sender_name: string;
   };
-}
-
-// In-memory leads store
-const leads: Map<string, Lead> = new Map();
-
-// Cookie name for persisting leads
-const LEADS_COOKIE = 'novee_dev_leads';
-
-/**
- * Generate a simple UUID-like ID
- */
-function generateId(): string {
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-    const r = Math.random() * 16 | 0;
-    const v = c === 'x' ? r : (r & 0x3 | 0x8);
-    return v.toString(16);
-  });
-}
-
-// Track if we've loaded from cookie this server instance
-let cookieLoaded = false;
-
-/**
- * Load leads from cookie (development persistence)
- * Only loads once per server instance to preserve in-memory state
- */
-async function loadLeadsFromCookie(): Promise<void> {
-  // Only load from cookie once, then rely on in-memory store
-  if (cookieLoaded) return;
-
-  try {
-    const cookieStore = await cookies();
-    const leadsCookie = cookieStore.get(LEADS_COOKIE)?.value;
-    if (leadsCookie) {
-      const decoded = Buffer.from(leadsCookie, 'base64').toString('utf-8');
-      const leadsArray: Lead[] = JSON.parse(decoded);
-      // Don't clear - merge with existing in-memory leads
-      for (const lead of leadsArray) {
-        if (!leads.has(lead.id)) {
-          leads.set(lead.id, lead);
-        }
-      }
-    }
-    cookieLoaded = true;
-  } catch {
-    // Ignore errors, start fresh
-    cookieLoaded = true;
-  }
-}
-
-/**
- * Save leads to cookie (development persistence)
- */
-async function saveLeadsToCookie(): Promise<void> {
-  try {
-    const cookieStore = await cookies();
-    const leadsArray = Array.from(leads.values());
-    const encoded = Buffer.from(JSON.stringify(leadsArray)).toString('base64');
-    cookieStore.set(LEADS_COOKIE, encoded, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 60 * 60 * 24 * 30, // 30 days
-      path: '/',
-    });
-  } catch {
-    // Ignore errors
-  }
-}
-
-/**
- * Get all leads for a specific user
- */
-export async function getLeadsByUserId(userId: string): Promise<Lead[]> {
-  await loadLeadsFromCookie();
-  return Array.from(leads.values()).filter(lead => lead.user_id === userId);
 }
 
 /**
@@ -117,6 +38,40 @@ export interface PaginatedResult<T> {
 }
 
 /**
+ * Get all leads for a specific user
+ */
+export async function getLeadsByUserId(userId: string): Promise<Lead[]> {
+  const supabase = await createClient();
+
+  const { data, error } = await supabase
+    .from('leads')
+    .select(`
+      *,
+      posts (
+        content,
+        source_url,
+        timestamp,
+        metadata,
+        channels (
+          name,
+          platform_connections (
+            platform
+          )
+        )
+      )
+    `)
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    console.error('Failed to get leads:', error);
+    return [];
+  }
+
+  return (data || []).map(transformLeadRow);
+}
+
+/**
  * Get paginated leads for a specific user
  */
 export async function getLeadsByUserIdPaginated(
@@ -124,22 +79,55 @@ export async function getLeadsByUserIdPaginated(
   page: number = 1,
   pageSize: number = 20
 ): Promise<PaginatedResult<Lead>> {
-  await loadLeadsFromCookie();
+  const supabase = await createClient();
 
-  // Get all leads for user, sorted by created_at descending
-  const userLeads = Array.from(leads.values())
-    .filter(lead => lead.user_id === userId)
-    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+  // Get total count
+  const { count: total } = await supabase
+    .from('leads')
+    .select('*', { count: 'exact', head: true })
+    .eq('user_id', userId);
 
-  const total = userLeads.length;
-  const totalPages = Math.ceil(total / pageSize);
-  const startIndex = (page - 1) * pageSize;
-  const endIndex = startIndex + pageSize;
-  const paginatedLeads = userLeads.slice(startIndex, endIndex);
+  const totalCount = total || 0;
+  const totalPages = Math.ceil(totalCount / pageSize);
+  const offset = (page - 1) * pageSize;
+
+  // Get paginated data
+  const { data, error } = await supabase
+    .from('leads')
+    .select(`
+      *,
+      posts (
+        content,
+        source_url,
+        timestamp,
+        metadata,
+        channels (
+          name,
+          platform_connections (
+            platform
+          )
+        )
+      )
+    `)
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+    .range(offset, offset + pageSize - 1);
+
+  if (error) {
+    console.error('Failed to get paginated leads:', error);
+    return {
+      data: [],
+      total: 0,
+      page,
+      pageSize,
+      totalPages: 0,
+      hasMore: false,
+    };
+  }
 
   return {
-    data: paginatedLeads,
-    total,
+    data: (data || []).map(transformLeadRow),
+    total: totalCount,
     page,
     pageSize,
     totalPages,
@@ -148,30 +136,104 @@ export async function getLeadsByUserIdPaginated(
 }
 
 /**
- * Get a single lead by ID
- * Returns null if not found
+ * Transform database row to Lead interface
  */
-export async function getLeadById(leadId: string): Promise<Lead | null> {
-  await loadLeadsFromCookie();
-  return leads.get(leadId) || null;
+function transformLeadRow(row: Record<string, unknown>): Lead {
+  const posts = row.posts as Record<string, unknown> | null;
+  const channels = posts?.channels as Record<string, unknown> | null;
+  const platformConnections = channels?.platform_connections as Record<string, unknown> | null;
+  const metadata = posts?.metadata as Record<string, unknown> | null;
+
+  return {
+    id: row.id as string,
+    user_id: row.user_id as string,
+    post_id: row.post_id as string,
+    matched_keywords: row.matched_keywords as string[],
+    status: row.status as LeadStatus,
+    first_viewed_at: row.first_viewed_at as string | null,
+    created_at: row.created_at as string,
+    updated_at: row.updated_at as string,
+    post: posts ? {
+      content: posts.content as string,
+      source_url: posts.source_url as string || '',
+      channel_name: channels?.name as string || 'Unknown',
+      platform: (platformConnections?.platform as 'SLACK' | 'LINKEDIN') || 'SLACK',
+      timestamp: posts.timestamp as string,
+      sender_name: (metadata?.sender_name as string) || 'Unknown User',
+    } : undefined,
+  };
 }
 
 /**
- * Get a lead by ID, but only if it belongs to the specified user
- * Returns null if not found or doesn't belong to user
+ * Get a single lead by ID
  */
-export async function getLeadByIdForUser(leadId: string, userId: string): Promise<Lead | null> {
-  await loadLeadsFromCookie();
-  const lead = leads.get(leadId);
-  if (!lead || lead.user_id !== userId) {
+export async function getLeadById(leadId: string): Promise<Lead | null> {
+  const supabase = await createClient();
+
+  const { data, error } = await supabase
+    .from('leads')
+    .select(`
+      *,
+      posts (
+        content,
+        source_url,
+        timestamp,
+        metadata,
+        channels (
+          name,
+          platform_connections (
+            platform
+          )
+        )
+      )
+    `)
+    .eq('id', leadId)
+    .single();
+
+  if (error || !data) {
     return null;
   }
-  return lead;
+
+  return transformLeadRow(data);
+}
+
+/**
+ * Get a lead by ID for a specific user
+ */
+export async function getLeadByIdForUser(leadId: string, userId: string): Promise<Lead | null> {
+  const supabase = await createClient();
+
+  const { data, error } = await supabase
+    .from('leads')
+    .select(`
+      *,
+      posts (
+        content,
+        source_url,
+        timestamp,
+        metadata,
+        channels (
+          name,
+          platform_connections (
+            platform
+          )
+        )
+      )
+    `)
+    .eq('id', leadId)
+    .eq('user_id', userId)
+    .single();
+
+  if (error || !data) {
+    return null;
+  }
+
+  return transformLeadRow(data);
 }
 
 /**
  * Create a new lead
- * Returns null if a duplicate lead exists (same user_id + post_id)
+ * Note: This function first creates or finds a post, then creates the lead
  */
 export async function createLead(
   userId: string,
@@ -182,100 +244,141 @@ export async function createLead(
     channelName?: string;
     senderName?: string;
     sourceUrl?: string;
-    postId?: string; // Optional: specify post ID for deduplication
+    postId?: string;
+    channelId?: string;
   }
 ): Promise<Lead | null> {
-  await loadLeadsFromCookie();
+  const supabase = await createClient();
 
-  const now = new Date().toISOString();
-  const postId = options?.postId || generateId();
+  // If channelId is provided, use it; otherwise we need to create or find a channel
+  let channelId = options?.channelId;
 
-  // Check for duplicate: same user_id + post_id
-  const existingLead = Array.from(leads.values()).find(
-    lead => lead.user_id === userId && lead.post_id === postId
-  );
-
-  if (existingLead) {
-    // Duplicate detected - return null to indicate constraint violation
+  if (!channelId) {
+    // For simplicity, we'll look for an existing channel or skip post creation
+    // In a real implementation, you'd need to ensure the channel exists
+    console.warn('No channel ID provided for lead creation');
     return null;
   }
 
-  const lead: Lead = {
-    id: generateId(),
-    user_id: userId,
-    post_id: postId,
-    matched_keywords: matchedKeywords,
-    status: 'NEW',
-    first_viewed_at: null,
-    created_at: now,
-    updated_at: now,
+  // Create the post first
+  const { data: post, error: postError } = await supabase
+    .from('posts')
+    .insert({
+      channel_id: channelId,
+      content: postContent,
+      source_url: options?.sourceUrl || null,
+      timestamp: new Date().toISOString(),
+      metadata: {
+        sender_name: options?.senderName || 'Unknown User',
+      },
+    })
+    .select()
+    .single();
+
+  if (postError || !post) {
+    console.error('Failed to create post:', postError);
+    return null;
+  }
+
+  // Create the lead
+  const { data: lead, error: leadError } = await supabase
+    .from('leads')
+    .insert({
+      user_id: userId,
+      post_id: post.id,
+      matched_keywords: matchedKeywords,
+      status: 'NEW',
+    })
+    .select()
+    .single();
+
+  if (leadError) {
+    // Check for duplicate
+    if (leadError.code === '23505') {
+      return null; // Duplicate lead
+    }
+    console.error('Failed to create lead:', leadError);
+    return null;
+  }
+
+  return {
+    id: lead.id,
+    user_id: lead.user_id,
+    post_id: lead.post_id,
+    matched_keywords: lead.matched_keywords,
+    status: lead.status,
+    first_viewed_at: lead.first_viewed_at,
+    created_at: lead.created_at,
+    updated_at: lead.updated_at,
     post: {
       content: postContent,
-      source_url: options?.sourceUrl || `https://example.com/post/${generateId()}`,
-      channel_name: options?.channelName || 'general',
+      source_url: options?.sourceUrl || '',
+      channel_name: options?.channelName || 'Unknown',
       platform: options?.platform || 'SLACK',
-      timestamp: now,
+      timestamp: post.timestamp,
       sender_name: options?.senderName || 'Unknown User',
     },
   };
-
-  leads.set(lead.id, lead);
-  await saveLeadsToCookie();
-
-  return lead;
 }
 
 /**
  * Update a lead's status
- * Returns the updated lead or null if not found/not owned by user
  */
 export async function updateLeadStatus(
   leadId: string,
   userId: string,
   status: LeadStatus
 ): Promise<Lead | null> {
-  await loadLeadsFromCookie();
+  const supabase = await createClient();
 
-  const lead = leads.get(leadId);
-  if (!lead || lead.user_id !== userId) {
+  const updateData: Record<string, unknown> = { status };
+
+  // Track first viewed time
+  if (status === 'VIEWED') {
+    const existing = await getLeadByIdForUser(leadId, userId);
+    if (existing && !existing.first_viewed_at) {
+      updateData.first_viewed_at = new Date().toISOString();
+    }
+  }
+
+  const { data, error } = await supabase
+    .from('leads')
+    .update(updateData)
+    .eq('id', leadId)
+    .eq('user_id', userId)
+    .select()
+    .single();
+
+  if (error || !data) {
+    console.error('Failed to update lead status:', error);
     return null;
   }
 
-  lead.status = status;
-  lead.updated_at = new Date().toISOString();
-
-  // Track first viewed time
-  if (status === 'VIEWED' && !lead.first_viewed_at) {
-    lead.first_viewed_at = new Date().toISOString();
-  }
-
-  leads.set(leadId, lead);
-  await saveLeadsToCookie();
-
-  return lead;
+  return getLeadByIdForUser(leadId, userId);
 }
 
 /**
- * Delete a lead (for testing purposes)
- * Returns true if deleted, false if not found/not owned by user
+ * Delete a lead
  */
 export async function deleteLead(leadId: string, userId: string): Promise<boolean> {
-  await loadLeadsFromCookie();
+  const supabase = await createClient();
 
-  const lead = leads.get(leadId);
-  if (!lead || lead.user_id !== userId) {
+  const { error } = await supabase
+    .from('leads')
+    .delete()
+    .eq('id', leadId)
+    .eq('user_id', userId);
+
+  if (error) {
+    console.error('Failed to delete lead:', error);
     return false;
   }
-
-  leads.delete(leadId);
-  await saveLeadsToCookie();
 
   return true;
 }
 
 /**
  * Demo leads data for new users
- * These are shown to help users understand what leads look like
  */
 const DEMO_LEADS = [
   {
@@ -303,7 +406,6 @@ const DEMO_LEADS = [
 
 /**
  * Get demo leads for a new user
- * Returns demo leads with isDemo flag set to true
  */
 export async function getDemoLeads(userId: string): Promise<(Lead & { isDemo: boolean })[]> {
   const now = new Date().toISOString();
@@ -334,34 +436,46 @@ export async function getDemoLeads(userId: string): Promise<(Lead & { isDemo: bo
 }
 
 /**
- * Check if user has any real leads (not demo)
+ * Check if user has any real leads
  */
 export async function userHasLeads(userId: string): Promise<boolean> {
-  await loadLeadsFromCookie();
-  return Array.from(leads.values()).some(lead => lead.user_id === userId);
+  const supabase = await createClient();
+
+  const { count } = await supabase
+    .from('leads')
+    .select('*', { count: 'exact', head: true })
+    .eq('user_id', userId);
+
+  return (count || 0) > 0;
 }
 
 /**
  * Delete all leads for a user
- * Used for account deletion cascade
- * Returns the number of leads deleted
  */
 export async function deleteAllLeadsForUser(userId: string): Promise<number> {
-  await loadLeadsFromCookie();
+  const supabase = await createClient();
 
-  const userLeads = Array.from(leads.values()).filter(lead => lead.user_id === userId);
-  let deletedCount = 0;
+  // Get count first
+  const { count } = await supabase
+    .from('leads')
+    .select('*', { count: 'exact', head: true })
+    .eq('user_id', userId);
 
-  for (const lead of userLeads) {
-    leads.delete(lead.id);
-    deletedCount++;
+  if (!count || count === 0) {
+    return 0;
   }
 
-  if (deletedCount > 0) {
-    await saveLeadsToCookie();
+  const { error } = await supabase
+    .from('leads')
+    .delete()
+    .eq('user_id', userId);
+
+  if (error) {
+    console.error('Failed to delete leads:', error);
+    return 0;
   }
 
-  return deletedCount;
+  return count;
 }
 
 /**
@@ -376,17 +490,34 @@ export async function getLeadStats(userId: string): Promise<{
   marked_later: number;
   archived: number;
 }> {
-  await loadLeadsFromCookie();
+  const supabase = await createClient();
 
-  const userLeads = Array.from(leads.values()).filter(lead => lead.user_id === userId);
+  // Get total count
+  const { count: total } = await supabase
+    .from('leads')
+    .select('*', { count: 'exact', head: true })
+    .eq('user_id', userId);
+
+  // Get counts by status
+  const statuses: LeadStatus[] = ['NEW', 'VIEWED', 'INTERESTED', 'NOT_INTERESTED', 'MARKED_LATER', 'ARCHIVED'];
+  const counts: Record<string, number> = {};
+
+  for (const status of statuses) {
+    const { count } = await supabase
+      .from('leads')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', userId)
+      .eq('status', status);
+    counts[status.toLowerCase()] = count || 0;
+  }
 
   return {
-    total: userLeads.length,
-    new: userLeads.filter(l => l.status === 'NEW').length,
-    viewed: userLeads.filter(l => l.status === 'VIEWED').length,
-    interested: userLeads.filter(l => l.status === 'INTERESTED').length,
-    not_interested: userLeads.filter(l => l.status === 'NOT_INTERESTED').length,
-    marked_later: userLeads.filter(l => l.status === 'MARKED_LATER').length,
-    archived: userLeads.filter(l => l.status === 'ARCHIVED').length,
+    total: total || 0,
+    new: counts.new || 0,
+    viewed: counts.viewed || 0,
+    interested: counts.interested || 0,
+    not_interested: counts.not_interested || 0,
+    marked_later: counts.marked_later || 0,
+    archived: counts.archived || 0,
   };
 }

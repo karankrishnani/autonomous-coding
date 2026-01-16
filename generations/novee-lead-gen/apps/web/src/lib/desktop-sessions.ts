@@ -1,11 +1,7 @@
 /**
- * Desktop app sessions data module
- * Handles CRUD operations for desktop app sessions with user isolation
+ * Desktop app sessions data module using Supabase.
  */
-
-import { v4 as uuidv4 } from 'uuid';
-import * as fs from 'fs';
-import * as path from 'path';
+import { createClient } from './supabase/server';
 
 export interface DesktopSession {
   id: string;
@@ -17,162 +13,158 @@ export interface DesktopSession {
   updated_at: string;
 }
 
-// File-based storage for development
-const DATA_DIR = path.join(process.cwd(), '..', '..', '.dev-data');
-const SESSIONS_FILE = path.join(DATA_DIR, 'desktop-sessions.json');
-
-// In-memory cache
-let sessionsCache: DesktopSession[] | null = null;
-
-function ensureDataDir(): void {
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-  }
-}
-
-function loadSessions(): DesktopSession[] {
-  if (sessionsCache !== null) {
-    return sessionsCache;
-  }
-
-  try {
-    ensureDataDir();
-    if (fs.existsSync(SESSIONS_FILE)) {
-      const data = fs.readFileSync(SESSIONS_FILE, 'utf-8');
-      sessionsCache = JSON.parse(data);
-      return sessionsCache || [];
-    }
-  } catch (error) {
-    console.error('Error loading desktop sessions:', error);
-  }
-
-  sessionsCache = [];
-  return sessionsCache;
-}
-
-function saveSessions(sessions: DesktopSession[]): void {
-  try {
-    ensureDataDir();
-    fs.writeFileSync(SESSIONS_FILE, JSON.stringify(sessions, null, 2));
-    sessionsCache = sessions;
-  } catch (error) {
-    console.error('Error saving desktop sessions:', error);
-  }
-}
-
 /**
  * Get all desktop sessions for a specific user
  */
-export function getSessionsForUser(userId: string): DesktopSession[] {
-  const sessions = loadSessions();
-  return sessions.filter(s => s.user_id === userId);
+export async function getSessionsForUser(userId: string): Promise<DesktopSession[]> {
+  const supabase = await createClient();
+
+  const { data, error } = await supabase
+    .from('desktop_app_sessions')
+    .select('*')
+    .eq('user_id', userId)
+    .order('last_seen_at', { ascending: false });
+
+  if (error) {
+    console.error('Failed to get sessions:', error);
+    return [];
+  }
+
+  return (data || []) as DesktopSession[];
 }
 
 /**
  * Get a specific session by ID (with user isolation)
  */
-export function getSessionById(sessionId: string, userId: string): DesktopSession | null {
-  const sessions = loadSessions();
-  return sessions.find(s => s.id === sessionId && s.user_id === userId) || null;
+export async function getSessionById(sessionId: string, userId: string): Promise<DesktopSession | null> {
+  const supabase = await createClient();
+
+  const { data, error } = await supabase
+    .from('desktop_app_sessions')
+    .select('*')
+    .eq('id', sessionId)
+    .eq('user_id', userId)
+    .single();
+
+  if (error) {
+    return null;
+  }
+
+  return data as DesktopSession;
 }
 
 /**
  * Register a new desktop app session
  */
-export function createSession(
+export async function createSession(
   userId: string,
   deviceLabel: string,
   osType: string
-): DesktopSession {
-  const sessions = loadSessions();
-  const now = new Date().toISOString();
+): Promise<DesktopSession> {
+  const supabase = await createClient();
 
-  const newSession: DesktopSession = {
-    id: uuidv4(),
-    user_id: userId,
-    device_label: deviceLabel,
-    os_type: osType,
-    last_seen_at: now,
-    created_at: now,
-    updated_at: now,
-  };
+  const { data, error } = await supabase
+    .from('desktop_app_sessions')
+    .insert({
+      user_id: userId,
+      device_label: deviceLabel,
+      os_type: osType,
+    })
+    .select()
+    .single();
 
-  sessions.push(newSession);
-  saveSessions(sessions);
+  if (error) {
+    throw new Error(`Failed to create session: ${error.message}`);
+  }
 
-  return newSession;
+  return data as DesktopSession;
 }
 
 /**
  * Update session's last_seen_at timestamp (heartbeat)
  */
-export function updateSessionHeartbeat(sessionId: string, userId: string): DesktopSession | null {
-  const sessions = loadSessions();
-  const sessionIndex = sessions.findIndex(s => s.id === sessionId && s.user_id === userId);
+export async function updateSessionHeartbeat(sessionId: string, userId: string): Promise<DesktopSession | null> {
+  const supabase = await createClient();
 
-  if (sessionIndex === -1) {
+  const { data, error } = await supabase
+    .from('desktop_app_sessions')
+    .update({ last_seen_at: new Date().toISOString() })
+    .eq('id', sessionId)
+    .eq('user_id', userId)
+    .select()
+    .single();
+
+  if (error) {
+    console.error('Failed to update session heartbeat:', error);
     return null;
   }
 
-  const now = new Date().toISOString();
-  sessions[sessionIndex] = {
-    ...sessions[sessionIndex],
-    last_seen_at: now,
-    updated_at: now,
-  };
-
-  saveSessions(sessions);
-  return sessions[sessionIndex];
+  return data as DesktopSession;
 }
 
 /**
  * Update session device label
  */
-export function updateSessionLabel(
+export async function updateSessionLabel(
   sessionId: string,
   userId: string,
   deviceLabel: string
-): DesktopSession | null {
-  const sessions = loadSessions();
-  const sessionIndex = sessions.findIndex(s => s.id === sessionId && s.user_id === userId);
+): Promise<DesktopSession | null> {
+  const supabase = await createClient();
 
-  if (sessionIndex === -1) {
+  const { data, error } = await supabase
+    .from('desktop_app_sessions')
+    .update({ device_label: deviceLabel })
+    .eq('id', sessionId)
+    .eq('user_id', userId)
+    .select()
+    .single();
+
+  if (error) {
+    console.error('Failed to update session label:', error);
     return null;
   }
 
-  const now = new Date().toISOString();
-  sessions[sessionIndex] = {
-    ...sessions[sessionIndex],
-    device_label: deviceLabel,
-    updated_at: now,
-  };
-
-  saveSessions(sessions);
-  return sessions[sessionIndex];
+  return data as DesktopSession;
 }
 
 /**
  * Delete a desktop session
  */
-export function deleteSession(sessionId: string, userId: string): boolean {
-  const sessions = loadSessions();
-  const initialLength = sessions.length;
-  const filteredSessions = sessions.filter(s => !(s.id === sessionId && s.user_id === userId));
+export async function deleteSession(sessionId: string, userId: string): Promise<boolean> {
+  const supabase = await createClient();
 
-  if (filteredSessions.length === initialLength) {
-    return false; // Session not found
+  const { error } = await supabase
+    .from('desktop_app_sessions')
+    .delete()
+    .eq('id', sessionId)
+    .eq('user_id', userId);
+
+  if (error) {
+    console.error('Failed to delete session:', error);
+    return false;
   }
 
-  saveSessions(filteredSessions);
   return true;
 }
 
 /**
  * Get session count for a user
  */
-export function getSessionCount(userId: string): number {
-  const sessions = loadSessions();
-  return sessions.filter(s => s.user_id === userId).length;
+export async function getSessionCount(userId: string): Promise<number> {
+  const supabase = await createClient();
+
+  const { count, error } = await supabase
+    .from('desktop_app_sessions')
+    .select('*', { count: 'exact', head: true })
+    .eq('user_id', userId);
+
+  if (error) {
+    console.error('Failed to get session count:', error);
+    return 0;
+  }
+
+  return count || 0;
 }
 
 /**

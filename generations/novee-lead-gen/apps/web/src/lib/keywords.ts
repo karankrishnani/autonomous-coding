@@ -1,11 +1,7 @@
 /**
- * Keywords data management for development.
- * In production, this would use Supabase with RLS.
- * For development, we use file-based persistence scoped to user IDs.
+ * Keywords data management using Supabase.
  */
-
-import * as fs from 'fs';
-import * as path from 'path';
+import { createClient } from './supabase/server';
 
 export interface KeywordGroup {
   id: string;
@@ -16,165 +12,246 @@ export interface KeywordGroup {
   updated_at: string;
 }
 
-// In-memory keyword groups store (loaded from file on startup)
-const keywordGroups: Map<string, KeywordGroup> = new Map();
+// Internal interface matching Supabase schema
+interface KeywordGroupRow {
+  id: string;
+  user_id: string;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+}
 
-// File path for keyword persistence
-const DATA_DIR = path.join(process.cwd(), '.dev-data');
-const KEYWORDS_FILE = path.join(DATA_DIR, 'keywords.json');
-
-// Flag to track if keywords have been loaded
-let keywordsLoaded = false;
-
-/**
- * Ensure the data directory exists
- */
-function ensureDataDir(): void {
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-  }
+interface KeywordRow {
+  id: string;
+  user_keyword_group_id: string;
+  text: string;
+  created_at: string;
+  updated_at: string;
 }
 
 /**
- * Load keywords from JSON file
+ * Convert database rows to KeywordGroup
  */
-function loadKeywordsFromFile(): void {
-  if (keywordsLoaded) return;
-
-  try {
-    if (fs.existsSync(KEYWORDS_FILE)) {
-      const data = fs.readFileSync(KEYWORDS_FILE, 'utf-8');
-      const keywordsArray: KeywordGroup[] = JSON.parse(data);
-      keywordGroups.clear();
-      for (const group of keywordsArray) {
-        keywordGroups.set(group.id, group);
-      }
-    }
-  } catch (error) {
-    console.error('Error loading keywords from file:', error);
-  }
-
-  keywordsLoaded = true;
-}
-
-/**
- * Save keywords to JSON file
- */
-function saveKeywordsToFile(): void {
-  try {
-    ensureDataDir();
-    const keywordsArray = Array.from(keywordGroups.values());
-    fs.writeFileSync(KEYWORDS_FILE, JSON.stringify(keywordsArray, null, 2));
-  } catch (error) {
-    console.error('Error saving keywords to file:', error);
-  }
-}
-
-/**
- * Generate a simple UUID-like ID
- */
-function generateId(): string {
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-    const r = Math.random() * 16 | 0;
-    const v = c === 'x' ? r : (r & 0x3 | 0x8);
-    return v.toString(16);
-  });
+function rowsToKeywordGroup(group: KeywordGroupRow, keywords: KeywordRow[]): KeywordGroup {
+  return {
+    id: group.id,
+    user_id: group.user_id,
+    keywords: keywords.map(k => k.text),
+    active: group.active,
+    created_at: group.created_at,
+    updated_at: group.updated_at,
+  };
 }
 
 /**
  * Get all keyword groups for a specific user
- * This implements RLS - users can only see their own data
  */
-export function getKeywordGroupsByUserId(userId: string): KeywordGroup[] {
-  loadKeywordsFromFile();
-  return Array.from(keywordGroups.values()).filter(group => group.user_id === userId);
+export async function getKeywordGroupsByUserId(userId: string): Promise<KeywordGroup[]> {
+  const supabase = await createClient();
+
+  // Get all keyword groups for user
+  const { data: groups, error: groupsError } = await supabase
+    .from('user_keyword_groups')
+    .select('*')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false });
+
+  if (groupsError || !groups) {
+    console.error('Failed to get keyword groups:', groupsError);
+    return [];
+  }
+
+  if (groups.length === 0) {
+    return [];
+  }
+
+  // Get all keywords for these groups
+  const groupIds = groups.map(g => g.id);
+  const { data: keywords, error: keywordsError } = await supabase
+    .from('keywords')
+    .select('*')
+    .in('user_keyword_group_id', groupIds);
+
+  if (keywordsError) {
+    console.error('Failed to get keywords:', keywordsError);
+    return [];
+  }
+
+  // Map keywords to groups
+  const keywordsByGroup = new Map<string, KeywordRow[]>();
+  for (const keyword of (keywords || [])) {
+    const existing = keywordsByGroup.get(keyword.user_keyword_group_id) || [];
+    existing.push(keyword);
+    keywordsByGroup.set(keyword.user_keyword_group_id, existing);
+  }
+
+  return groups.map(group =>
+    rowsToKeywordGroup(group, keywordsByGroup.get(group.id) || [])
+  );
 }
 
 /**
  * Get a specific keyword group by ID
- * Returns null if not found or doesn't belong to user
  */
-export function getKeywordGroupById(groupId: string, userId: string): KeywordGroup | null {
-  loadKeywordsFromFile();
-  const group = keywordGroups.get(groupId);
-  if (!group || group.user_id !== userId) {
+export async function getKeywordGroupById(groupId: string, userId: string): Promise<KeywordGroup | null> {
+  const supabase = await createClient();
+
+  const { data: group, error: groupError } = await supabase
+    .from('user_keyword_groups')
+    .select('*')
+    .eq('id', groupId)
+    .eq('user_id', userId)
+    .single();
+
+  if (groupError || !group) {
     return null;
   }
-  return group;
+
+  const { data: keywords } = await supabase
+    .from('keywords')
+    .select('*')
+    .eq('user_keyword_group_id', groupId);
+
+  return rowsToKeywordGroup(group, keywords || []);
 }
 
 /**
  * Create a new keyword group for a user
  */
-export function createKeywordGroup(userId: string, keywords: string[]): KeywordGroup {
-  loadKeywordsFromFile();
-  const now = new Date().toISOString();
-  const group: KeywordGroup = {
-    id: generateId(),
-    user_id: userId,
-    keywords,
-    active: true,
-    created_at: now,
-    updated_at: now,
-  };
+export async function createKeywordGroup(userId: string, keywords: string[]): Promise<KeywordGroup> {
+  const supabase = await createClient();
 
-  keywordGroups.set(group.id, group);
-  saveKeywordsToFile();
-  return group;
+  // Create the group
+  const { data: group, error: groupError } = await supabase
+    .from('user_keyword_groups')
+    .insert({ user_id: userId, active: true })
+    .select()
+    .single();
+
+  if (groupError || !group) {
+    throw new Error(`Failed to create keyword group: ${groupError?.message}`);
+  }
+
+  // Insert keywords
+  if (keywords.length > 0) {
+    const keywordInserts = keywords.map(text => ({
+      user_keyword_group_id: group.id,
+      text,
+    }));
+
+    const { error: keywordsError } = await supabase
+      .from('keywords')
+      .insert(keywordInserts);
+
+    if (keywordsError) {
+      // Rollback by deleting the group
+      await supabase.from('user_keyword_groups').delete().eq('id', group.id);
+      throw new Error(`Failed to create keywords: ${keywordsError.message}`);
+    }
+  }
+
+  return {
+    id: group.id,
+    user_id: group.user_id,
+    keywords,
+    active: group.active,
+    created_at: group.created_at,
+    updated_at: group.updated_at,
+  };
 }
 
 /**
  * Update a keyword group
- * Only updates if the group belongs to the user (RLS)
  */
-export function updateKeywordGroup(
+export async function updateKeywordGroup(
   groupId: string,
   userId: string,
   updates: { keywords?: string[]; active?: boolean }
-): KeywordGroup | null {
-  loadKeywordsFromFile();
-  const group = keywordGroups.get(groupId);
-  if (!group || group.user_id !== userId) {
+): Promise<KeywordGroup | null> {
+  const supabase = await createClient();
+
+  // Verify ownership
+  const existing = await getKeywordGroupById(groupId, userId);
+  if (!existing) {
     return null;
   }
 
-  if (updates.keywords !== undefined) {
-    group.keywords = updates.keywords;
-  }
+  // Update active status if provided
   if (updates.active !== undefined) {
-    group.active = updates.active;
-  }
-  group.updated_at = new Date().toISOString();
+    const { error } = await supabase
+      .from('user_keyword_groups')
+      .update({ active: updates.active })
+      .eq('id', groupId);
 
-  keywordGroups.set(groupId, group);
-  saveKeywordsToFile();
-  return group;
+    if (error) {
+      console.error('Failed to update keyword group:', error);
+      return null;
+    }
+  }
+
+  // Update keywords if provided
+  if (updates.keywords !== undefined) {
+    // Delete existing keywords
+    await supabase
+      .from('keywords')
+      .delete()
+      .eq('user_keyword_group_id', groupId);
+
+    // Insert new keywords
+    if (updates.keywords.length > 0) {
+      const keywordInserts = updates.keywords.map(text => ({
+        user_keyword_group_id: groupId,
+        text,
+      }));
+
+      const { error } = await supabase
+        .from('keywords')
+        .insert(keywordInserts);
+
+      if (error) {
+        console.error('Failed to update keywords:', error);
+        return null;
+      }
+    }
+  }
+
+  return getKeywordGroupById(groupId, userId);
 }
 
 /**
  * Delete a keyword group
- * Only deletes if the group belongs to the user (RLS)
  */
-export function deleteKeywordGroup(groupId: string, userId: string): boolean {
-  loadKeywordsFromFile();
-  const group = keywordGroups.get(groupId);
-  if (!group || group.user_id !== userId) {
+export async function deleteKeywordGroup(groupId: string, userId: string): Promise<boolean> {
+  const supabase = await createClient();
+
+  // Verify ownership first
+  const existing = await getKeywordGroupById(groupId, userId);
+  if (!existing) {
     return false;
   }
 
-  keywordGroups.delete(groupId);
-  saveKeywordsToFile();
+  // Delete the group (keywords will cascade delete due to FK)
+  const { error } = await supabase
+    .from('user_keyword_groups')
+    .delete()
+    .eq('id', groupId);
+
+  if (error) {
+    console.error('Failed to delete keyword group:', error);
+    return false;
+  }
+
   return true;
 }
 
 /**
  * Get all unique keywords for a user across all their groups
  */
-export function getAllKeywordsForUser(userId: string): string[] {
-  const userGroups = getKeywordGroupsByUserId(userId);
+export async function getAllKeywordsForUser(userId: string): Promise<string[]> {
+  const groups = await getKeywordGroupsByUserId(userId);
   const allKeywords = new Set<string>();
 
-  for (const group of userGroups) {
+  for (const group of groups) {
     if (group.active) {
       for (const keyword of group.keywords) {
         allKeywords.add(keyword);
@@ -187,47 +264,73 @@ export function getAllKeywordsForUser(userId: string): string[] {
 
 /**
  * Clear all keyword groups for a user
- * Returns the number of groups deleted
  */
-export function clearAllKeywordsForUser(userId: string): number {
-  loadKeywordsFromFile();
-  const userGroups = getKeywordGroupsByUserId(userId);
-  let deletedCount = 0;
+export async function clearAllKeywordsForUser(userId: string): Promise<number> {
+  const supabase = await createClient();
+  const groups = await getKeywordGroupsByUserId(userId);
 
-  for (const group of userGroups) {
-    keywordGroups.delete(group.id);
-    deletedCount++;
+  if (groups.length === 0) {
+    return 0;
   }
 
-  saveKeywordsToFile();
-  return deletedCount;
+  const { error } = await supabase
+    .from('user_keyword_groups')
+    .delete()
+    .eq('user_id', userId);
+
+  if (error) {
+    console.error('Failed to clear keywords:', error);
+    return 0;
+  }
+
+  return groups.length;
 }
 
 /**
  * Delete a specific keyword from all groups for a user
- * Returns true if the keyword was found and deleted
  */
-export function deleteKeywordForUser(userId: string, keyword: string): boolean {
-  loadKeywordsFromFile();
-  const userGroups = getKeywordGroupsByUserId(userId);
-  let foundAndDeleted = false;
+export async function deleteKeywordForUser(userId: string, keyword: string): Promise<boolean> {
+  const supabase = await createClient();
 
-  for (const group of userGroups) {
-    const keywordIndex = group.keywords.indexOf(keyword);
-    if (keywordIndex !== -1) {
-      group.keywords.splice(keywordIndex, 1);
-      group.updated_at = new Date().toISOString();
-      foundAndDeleted = true;
+  // Get all groups for this user
+  const { data: groups } = await supabase
+    .from('user_keyword_groups')
+    .select('id')
+    .eq('user_id', userId);
 
-      // If the group is now empty, delete it
-      if (group.keywords.length === 0) {
-        keywordGroups.delete(group.id);
-      } else {
-        keywordGroups.set(group.id, group);
-      }
+  if (!groups || groups.length === 0) {
+    return false;
+  }
+
+  const groupIds = groups.map(g => g.id);
+
+  // Delete the keyword from all groups
+  const { error, count } = await supabase
+    .from('keywords')
+    .delete()
+    .in('user_keyword_group_id', groupIds)
+    .eq('text', keyword);
+
+  if (error) {
+    console.error('Failed to delete keyword:', error);
+    return false;
+  }
+
+  // Clean up empty groups
+  for (const group of groups) {
+    const { data: remaining } = await supabase
+      .from('keywords')
+      .select('id')
+      .eq('user_keyword_group_id', group.id)
+      .limit(1);
+
+    if (!remaining || remaining.length === 0) {
+      await supabase
+        .from('user_keyword_groups')
+        .delete()
+        .eq('id', group.id);
     }
   }
 
-  saveKeywordsToFile();
-  return foundAndDeleted;
+  return (count || 0) > 0;
 }

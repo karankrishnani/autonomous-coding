@@ -1,12 +1,8 @@
 /**
- * Simple auth library for development.
- * In production, this would use Supabase Auth.
- * For development, we store user data in a JSON file for persistence.
+ * Authentication library using Supabase Auth
  */
-
-import { cookies } from 'next/headers';
-import * as fs from 'fs';
-import * as path from 'path';
+import { createClient, createRouteHandlerClient } from './supabase/server';
+import { NextResponse } from 'next/server';
 
 export interface User {
   id: string;
@@ -15,92 +11,11 @@ export interface User {
   created_at: string;
 }
 
-interface StoredUser extends User {
-  password: string;
-}
-
-// In-memory user store for development (persisted to JSON file)
-// In production, this would be Supabase
-const users: Map<string, StoredUser> = new Map();
-
-// Cookie names
-const SESSION_COOKIE = 'novee_session';
-
-// File path for user persistence
-const DATA_DIR = path.join(process.cwd(), '.dev-data');
-const USERS_FILE = path.join(DATA_DIR, 'users.json');
-
-// Flag to track if users have been loaded
-let usersLoaded = false;
-
-/**
- * Generate a simple UUID-like ID
- */
-function generateId(): string {
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-    const r = Math.random() * 16 | 0;
-    const v = c === 'x' ? r : (r & 0x3 | 0x8);
-    return v.toString(16);
-  });
-}
-
-/**
- * Simple password hashing for development
- * In production, use bcrypt or similar
- */
-function hashPassword(password: string): string {
-  // Simple hash for development - NOT SECURE FOR PRODUCTION
-  let hash = 0;
-  for (let i = 0; i < password.length; i++) {
-    const char = password.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
-    hash = hash & hash;
-  }
-  return `dev_hash_${hash.toString(16)}`;
-}
-
-/**
- * Ensure the data directory exists
- */
-function ensureDataDir(): void {
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-  }
-}
-
-/**
- * Load users from JSON file (development persistence)
- */
-function loadUsersFromFile(): void {
-  if (usersLoaded) return;
-
-  try {
-    if (fs.existsSync(USERS_FILE)) {
-      const data = fs.readFileSync(USERS_FILE, 'utf-8');
-      const usersArray: StoredUser[] = JSON.parse(data);
-      users.clear();
-      for (const user of usersArray) {
-        users.set(user.id, user);
-      }
-    }
-  } catch (error) {
-    console.error('Error loading users from file:', error);
-  }
-
-  usersLoaded = true;
-}
-
-/**
- * Save users to JSON file (development persistence)
- */
-function saveUsersToFile(): void {
-  try {
-    ensureDataDir();
-    const usersArray = Array.from(users.values());
-    fs.writeFileSync(USERS_FILE, JSON.stringify(usersArray, null, 2));
-  } catch (error) {
-    console.error('Error saving users to file:', error);
-  }
+// Type for the route handler result
+export interface AuthRouteResult {
+  user?: User;
+  error?: string;
+  applyToResponse: (response: NextResponse) => NextResponse;
 }
 
 /**
@@ -111,31 +26,79 @@ export async function createUser(
   password: string,
   name: string
 ): Promise<{ user?: User; error?: string }> {
-  // Load existing users from file
-  loadUsersFromFile();
+  const supabase = await createClient();
 
-  // Check if user exists
-  const existingUser = Array.from(users.values()).find(u => u.email === email);
-  if (existingUser) {
-    return { error: 'An account with this email already exists' };
+  const { data, error } = await supabase.auth.signUp({
+    email,
+    password,
+    options: {
+      data: {
+        full_name: name,
+      },
+    },
+  });
+
+  if (error) {
+    if (error.message.includes('already registered')) {
+      return { error: 'An account with this email already exists' };
+    }
+    return { error: error.message };
   }
 
-  const user: StoredUser = {
-    id: generateId(),
-    email,
-    name,
-    password: hashPassword(password),
-    created_at: new Date().toISOString(),
+  if (!data.user) {
+    return { error: 'Failed to create account' };
+  }
+
+  return {
+    user: {
+      id: data.user.id,
+      email: data.user.email!,
+      name: name,
+      created_at: data.user.created_at,
+    },
   };
+}
 
-  users.set(user.id, user);
+/**
+ * Create a new user account for Route Handlers - returns applyToResponse to set cookies
+ */
+export async function createUserForRoute(
+  email: string,
+  password: string,
+  name: string
+): Promise<AuthRouteResult> {
+  const { supabase, applyToResponse } = await createRouteHandlerClient();
 
-  // Persist users to file
-  saveUsersToFile();
+  const { data, error } = await supabase.auth.signUp({
+    email,
+    password,
+    options: {
+      data: {
+        full_name: name,
+      },
+    },
+  });
 
-  // Return user without password
-  const { password: _, ...safeUser } = user;
-  return { user: safeUser };
+  if (error) {
+    if (error.message.includes('already registered')) {
+      return { error: 'An account with this email already exists', applyToResponse };
+    }
+    return { error: error.message, applyToResponse };
+  }
+
+  if (!data.user) {
+    return { error: 'Failed to create account', applyToResponse };
+  }
+
+  return {
+    user: {
+      id: data.user.id,
+      email: data.user.email!,
+      name: name,
+      created_at: data.user.created_at,
+    },
+    applyToResponse,
+  };
 }
 
 /**
@@ -145,133 +108,165 @@ export async function authenticateUser(
   email: string,
   password: string
 ): Promise<{ user?: User; error?: string }> {
-  // Load existing users from file
-  loadUsersFromFile();
+  const supabase = await createClient();
 
-  const user = Array.from(users.values()).find(u => u.email === email);
-
-  if (!user) {
-    return { error: 'Invalid email or password' };
-  }
-
-  if (user.password !== hashPassword(password)) {
-    return { error: 'Invalid email or password' };
-  }
-
-  // Return user without password
-  const { password: _, ...safeUser } = user;
-  return { user: safeUser };
-}
-
-/**
- * Create a session for a user
- */
-export async function createSession(user: User): Promise<void> {
-  const cookieStore = await cookies();
-
-  // Store user data in session cookie (base64 encoded)
-  const sessionData = Buffer.from(JSON.stringify(user)).toString('base64');
-
-  cookieStore.set(SESSION_COOKIE, sessionData, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
-    maxAge: 60 * 60 * 24 * 7, // 7 days
-    path: '/',
+  const { data, error } = await supabase.auth.signInWithPassword({
+    email,
+    password,
   });
+
+  if (error) {
+    return { error: 'Invalid email or password' };
+  }
+
+  if (!data.user) {
+    return { error: 'Invalid email or password' };
+  }
+
+  // Fetch user profile from public.users table
+  const { data: profile } = await supabase
+    .from('users')
+    .select('name')
+    .eq('id', data.user.id)
+    .single();
+
+  return {
+    user: {
+      id: data.user.id,
+      email: data.user.email!,
+      name: profile?.name || data.user.user_metadata?.full_name || '',
+      created_at: data.user.created_at,
+    },
+  };
 }
 
 /**
- * Validate that an object has all required User fields
+ * Authenticate a user for Route Handlers - returns applyToResponse to set cookies
  */
-function isValidUser(obj: unknown): obj is User {
-  if (!obj || typeof obj !== 'object') {
-    return false;
+export async function authenticateUserForRoute(
+  email: string,
+  password: string
+): Promise<AuthRouteResult> {
+  const { supabase, applyToResponse: baseApplyToResponse } = await createRouteHandlerClient();
+
+  const { data, error } = await supabase.auth.signInWithPassword({
+    email,
+    password,
+  });
+
+  if (error) {
+    return { error: 'Invalid email or password', applyToResponse: baseApplyToResponse };
   }
 
-  const user = obj as Record<string, unknown>;
-
-  // Check all required fields exist and are non-empty strings
-  if (typeof user.id !== 'string' || user.id.trim() === '') {
-    return false;
-  }
-  if (typeof user.email !== 'string' || user.email.trim() === '') {
-    return false;
-  }
-  if (typeof user.name !== 'string' || user.name.trim() === '') {
-    return false;
-  }
-  if (typeof user.created_at !== 'string' || user.created_at.trim() === '') {
-    return false;
+  if (!data.user || !data.session) {
+    return { error: 'Invalid email or password', applyToResponse: baseApplyToResponse };
   }
 
-  // Validate email format (basic check)
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  if (!emailRegex.test(user.email)) {
-    return false;
-  }
+  // Fetch user profile from public.users table
+  const { data: profile } = await supabase
+    .from('users')
+    .select('name')
+    .eq('id', data.user.id)
+    .single();
 
-  // Validate UUID format for id (basic check)
-  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-  if (!uuidRegex.test(user.id)) {
-    return false;
-  }
+  // Manually set auth cookies since Supabase SSR doesn't automatically call setAll after signIn
+  const applyToResponse = (response: NextResponse): NextResponse => {
+    // Apply any cookies from Supabase (if any)
+    baseApplyToResponse(response);
 
-  // Validate created_at is a valid date string
-  const date = new Date(user.created_at);
-  if (isNaN(date.getTime())) {
-    return false;
-  }
+    // Set the session cookie in the format Supabase expects
+    const projectRef = process.env.NEXT_PUBLIC_SUPABASE_URL?.match(/https:\/\/([^.]+)/)?.[1] || '127';
+    const cookieName = `sb-${projectRef}-auth-token`;
 
-  return true;
+    // Session data in Supabase's expected format
+    const sessionData = {
+      access_token: data.session.access_token,
+      refresh_token: data.session.refresh_token,
+      expires_at: data.session.expires_at,
+      expires_in: data.session.expires_in,
+      token_type: data.session.token_type,
+      user: data.session.user,
+    };
+
+    // Base64 encode the session (Supabase SSR expects this format)
+    const cookieValue = Buffer.from(JSON.stringify(sessionData)).toString('base64');
+
+    response.cookies.set(cookieName, cookieValue, {
+      path: '/',
+      sameSite: 'lax',
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      maxAge: 60 * 60 * 24 * 7, // 7 days
+    });
+
+    return response;
+  };
+
+  return {
+    user: {
+      id: data.user.id,
+      email: data.user.email!,
+      name: profile?.name || data.user.user_metadata?.full_name || '',
+      created_at: data.user.created_at,
+    },
+    applyToResponse,
+  };
 }
 
-// Session expiration time in milliseconds (7 days)
-const SESSION_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
-
 /**
- * Check if a session has expired based on issued_at timestamp
+ * Create a session for a user (no-op with Supabase Auth - session is automatic)
  */
-function isSessionExpired(issuedAt: string): boolean {
-  const issuedDate = new Date(issuedAt);
-  if (isNaN(issuedDate.getTime())) {
-    // Invalid date, consider expired
-    return true;
-  }
-
-  const now = new Date();
-  const ageMs = now.getTime() - issuedDate.getTime();
-
-  return ageMs > SESSION_MAX_AGE_MS;
+export async function createSession(_user: User): Promise<void> {
+  // Supabase Auth handles session creation automatically on sign in/up
+  // This function is kept for API compatibility
 }
 
 /**
  * Get the current session user
  */
 export async function getSessionUser(): Promise<User | null> {
+  const { cookies } = await import('next/headers');
+  const cookieStore = await cookies();
+
+  // Get the auth cookie and parse it
+  const projectRef = process.env.NEXT_PUBLIC_SUPABASE_URL?.match(/https:\/\/([^.]+)/)?.[1] || '127';
+  const cookieName = `sb-${projectRef}-auth-token`;
+  const authCookie = cookieStore.get(cookieName);
+
+  if (!authCookie?.value) {
+    return null;
+  }
+
   try {
-    const cookieStore = await cookies();
-    const sessionCookie = cookieStore.get(SESSION_COOKIE)?.value;
+    // URL decode then base64 decode the cookie value
+    let cookieValue = decodeURIComponent(authCookie.value);
+    const sessionData = JSON.parse(Buffer.from(cookieValue, 'base64').toString('utf-8'));
 
-    if (!sessionCookie) {
+    if (!sessionData.access_token || !sessionData.user) {
       return null;
     }
 
-    // Decode user data from session cookie
-    const decoded = Buffer.from(sessionCookie, 'base64').toString('utf-8');
-    const parsed = JSON.parse(decoded);
+    // Use the access token to validate with Supabase
+    const supabase = await createClient();
+    const { data: { user }, error } = await supabase.auth.getUser(sessionData.access_token);
 
-    // Validate the parsed object has all required fields
-    if (!isValidUser(parsed)) {
+    if (error || !user) {
       return null;
     }
 
-    // Check session expiration if issued_at is present
-    if (parsed.issued_at && isSessionExpired(parsed.issued_at)) {
-      return null;
-    }
+    // Fetch user profile from public.users table
+    const { data: profile } = await supabase
+      .from('users')
+      .select('name, created_at')
+      .eq('id', user.id)
+      .single();
 
-    return parsed;
+    return {
+      id: user.id,
+      email: user.email!,
+      name: profile?.name || user.user_metadata?.full_name || '',
+      created_at: profile?.created_at || user.created_at,
+    };
   } catch {
     return null;
   }
@@ -281,55 +276,46 @@ export async function getSessionUser(): Promise<User | null> {
  * Clear the current session
  */
 export async function clearSession(): Promise<void> {
-  const cookieStore = await cookies();
-  cookieStore.delete(SESSION_COOKIE);
+  const supabase = await createClient();
+  await supabase.auth.signOut();
 }
 
 /**
  * Update a user's profile
- * This updates both the in-memory store (if available) and the session
  */
 export async function updateUserProfile(
   currentUser: User,
   updates: { name?: string }
 ): Promise<{ user: User }> {
-  // Create updated user object
+  const supabase = await createClient();
+
+  // Update name in public.users table
+  if (updates.name !== undefined) {
+    await supabase
+      .from('users')
+      .update({ name: updates.name })
+      .eq('id', currentUser.id);
+
+    // Also update user metadata
+    await supabase.auth.updateUser({
+      data: { full_name: updates.name },
+    });
+  }
+
   const updatedUser: User = {
     ...currentUser,
     name: updates.name !== undefined ? updates.name : currentUser.name,
   };
-
-  // Try to update in-memory store if the user exists there
-  loadUsersFromFile();
-  const storedUser = users.get(currentUser.id);
-  if (storedUser) {
-    if (updates.name !== undefined) {
-      storedUser.name = updates.name;
-    }
-    users.set(currentUser.id, storedUser);
-    saveUsersToFile();
-  }
-
-  // Update session with new user data
-  await createSession(updatedUser);
 
   return { user: updatedUser };
 }
 
 /**
  * Delete a user account
- * Removes the user from the in-memory store and clears the session
- * Returns true if user was deleted, false if not found
+ * Note: This only signs out the user. Full account deletion requires admin API.
  */
-export async function deleteUser(userId: string): Promise<boolean> {
-  // Check if user exists in memory
-  const exists = users.has(userId);
-
-  // Delete from in-memory store
-  users.delete(userId);
-
-  // Clear the session
-  await clearSession();
-
-  return exists;
+export async function deleteUser(_userId: string): Promise<boolean> {
+  const supabase = await createClient();
+  await supabase.auth.signOut();
+  return true;
 }
