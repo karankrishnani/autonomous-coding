@@ -11,6 +11,32 @@
 import { contextBridge, ipcRenderer } from 'electron';
 
 /**
+ * User information returned from login
+ */
+interface UserInfo {
+  id: string;
+  email: string;
+  name: string;
+}
+
+/**
+ * Login result
+ */
+interface LoginResult {
+  success: boolean;
+  user?: UserInfo;
+  error?: string;
+}
+
+/**
+ * Session check result
+ */
+interface SessionResult {
+  isLoggedIn: boolean;
+  user?: UserInfo;
+}
+
+/**
  * Workspace information returned from Slack capture
  */
 interface WorkspaceInfo {
@@ -43,6 +69,12 @@ interface SearchResult {
  * API exposed to the renderer process
  */
 interface ElectronAPI {
+  // Authentication operations
+  login: (email: string, password: string) => Promise<LoginResult>;
+  logout: () => Promise<{ success: boolean }>;
+  checkSession: () => Promise<SessionResult>;
+  getWebAppUrl: () => Promise<string>;
+
   // Slack operations
   openSlackLogin: () => Promise<{ success: boolean }>;
   getSlackWorkspaces: () => Promise<WorkspaceInfo[]>;
@@ -59,6 +91,12 @@ interface ElectronAPI {
 
 // Expose the API to the renderer
 contextBridge.exposeInMainWorld('electronAPI', {
+  // Authentication operations
+  login: (email: string, password: string) => ipcRenderer.invoke('login', email, password),
+  logout: () => ipcRenderer.invoke('logout'),
+  checkSession: () => ipcRenderer.invoke('check-session'),
+  getWebAppUrl: () => ipcRenderer.invoke('get-web-app-url'),
+
   // Slack operations
   openSlackLogin: () => ipcRenderer.invoke('open-slack-login'),
   getSlackWorkspaces: () => ipcRenderer.invoke('get-slack-workspaces'),
