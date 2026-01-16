@@ -41,7 +41,7 @@ function createWindow() {
     mainWindow.webContents.openDevTools();
   } else {
     // In production, load the built renderer
-    mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'));
+    mainWindow.loadFile(path.join(__dirname, 'renderer/index.html'));
   }
 
   // Clean up on window close

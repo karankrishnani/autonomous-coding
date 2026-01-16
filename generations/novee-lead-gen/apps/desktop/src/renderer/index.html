@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'" />
+    <title>Novee Desktop</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div id="app">
+      <header class="header">
+        <div class="logo">
+          <span class="logo-icon">O</span>
+          <span class="logo-text">NOVEE</span>
+        </div>
+      </header>
+
+      <main class="main">
+        <div class="container">
+          <h1>Welcome to Novee Desktop</h1>
+          <p class="subtitle">Connect your platforms to start finding leads</p>
+
+          <div class="status-section">
+            <h2>Platform Connections</h2>
+            <div id="platforms-list" class="platforms-list">
+              <div class="platform-card">
+                <div class="platform-info">
+                  <span class="platform-icon">S</span>
+                  <div>
+                    <span class="platform-name">Slack</span>
+                    <span id="slack-status" class="platform-status status-disconnected">Not Connected</span>
+                  </div>
+                </div>
+                <button id="connect-slack-btn" class="btn btn-primary">Connect</button>
+              </div>
+
+              <div class="platform-card">
+                <div class="platform-info">
+                  <span class="platform-icon linkedin">in</span>
+                  <div>
+                    <span class="platform-name">LinkedIn</span>
+                    <span class="platform-status status-coming-soon">Coming Soon</span>
+                  </div>
+                </div>
+                <button class="btn btn-disabled" disabled>Connect</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="info-section">
+            <h2>How It Works</h2>
+            <ol class="steps-list">
+              <li>Click "Connect" to link your Slack workspace</li>
+              <li>Log in to your Slack account in the browser window</li>
+              <li>We'll automatically capture your workspace information</li>
+              <li>Set up keywords in the web app to find relevant leads</li>
+            </ol>
+          </div>
+        </div>
+      </main>
+
+      <footer class="footer">
+        <p>Novee reads but never posts to your connected platforms.</p>
+      </footer>
+    </div>
+
+    <script src="./renderer.ts" type="module"></script>
+  </body>
+</html>
