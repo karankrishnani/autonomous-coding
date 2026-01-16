@@ -212,8 +212,8 @@ export async function fetchScraperConfig(
       return null;
     }
 
-    const data = await response.json();
-    return data.config as ScraperConfig;
+    const data = (await response.json()) as { config: ScraperConfig };
+    return data.config;
   } catch (error) {
     console.error('[Scraper] Failed to fetch config:', error);
     return null;
@@ -249,6 +249,249 @@ export async function createScraper(
   };
 
   return new Scraper(platform, config, onLog);
+}
+
+// =============================================================================
+// Scraper Error Logging (API Integration)
+// =============================================================================
+
+/**
+ * Log a scraper error to the backend API
+ *
+ * This function is called when a scraper operation fails after all retries
+ * are exhausted. It stores the error message in the platform_connections table
+ * so it can be displayed in the web dashboard.
+ *
+ * @param apiBaseUrl - Base URL of the web API
+ * @param platform - Platform that failed (SLACK or LINKEDIN)
+ * @param errorMessage - Error message to log
+ * @param authToken - User's authentication token
+ */
+export async function logScraperErrorToAPI(
+  apiBaseUrl: string,
+  platform: string,
+  errorMessage: string,
+  authToken: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    console.log(`[Scraper] Logging error to API: ${platform} - ${errorMessage}`);
+
+    const response = await fetch(`${apiBaseUrl}/api/scraper/error`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Cookie: authToken,
+      },
+      body: JSON.stringify({
+        platform: platform.toUpperCase(),
+        error: errorMessage,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorData = (await response.json()) as { error?: string };
+      console.error(`[Scraper] Failed to log error to API: ${errorData.error || response.status}`);
+      return { success: false, error: errorData.error || 'Failed to log error' };
+    }
+
+    const successData = (await response.json()) as { connection?: { status: string } };
+    console.log(`[Scraper] Error logged successfully. Platform status: ${successData.connection?.status}`);
+    return { success: true };
+  } catch (error) {
+    console.error('[Scraper] Failed to log error to API:', error);
+    return { success: false, error: String(error) };
+  }
+}
+
+// =============================================================================
+// Scheduler Types and Utilities
+// =============================================================================
+
+/**
+ * Scheduled scrape run result
+ */
+export interface ScheduledRunResult {
+  platform: string;
+  startTime: Date;
+  endTime: Date;
+  success: boolean;
+  leadsFound: number;
+  error?: string;
+  retryAttempts: number;
+}
+
+/**
+ * Scraper scheduler state
+ */
+export interface ScraperSchedulerState {
+  isRunning: boolean;
+  lastRunResult: ScheduledRunResult | null;
+  nextScheduledRun: Date | null;
+  intervalMs: number;
+}
+
+/**
+ * Simple scraper scheduler that continues running even after errors
+ *
+ * This ensures that:
+ * 1. Scraper errors don't crash the scheduler
+ * 2. Next scheduled run proceeds after a failure
+ * 3. Errors are logged to the API for visibility
+ */
+export class ScraperScheduler {
+  private intervalId: ReturnType<typeof setInterval> | null = null;
+  private state: ScraperSchedulerState;
+  private apiBaseUrl: string;
+  private authToken: string;
+  private platform: string;
+  private scrapeFunction: () => Promise<{ success: boolean; leadsFound: number; error?: string }>;
+  private onStateChange?: (state: ScraperSchedulerState) => void;
+
+  constructor(options: {
+    apiBaseUrl: string;
+    authToken: string;
+    platform: string;
+    intervalMs: number;
+    scrapeFunction: () => Promise<{ success: boolean; leadsFound: number; error?: string }>;
+    onStateChange?: (state: ScraperSchedulerState) => void;
+  }) {
+    this.apiBaseUrl = options.apiBaseUrl;
+    this.authToken = options.authToken;
+    this.platform = options.platform;
+    this.scrapeFunction = options.scrapeFunction;
+    this.onStateChange = options.onStateChange;
+
+    this.state = {
+      isRunning: false,
+      lastRunResult: null,
+      nextScheduledRun: null,
+      intervalMs: options.intervalMs,
+    };
+  }
+
+  /**
+   * Get current scheduler state
+   */
+  getState(): ScraperSchedulerState {
+    return { ...this.state };
+  }
+
+  /**
+   * Start the scheduler
+   */
+  start(): void {
+    if (this.intervalId) {
+      console.log(`[Scheduler] ${this.platform} scheduler already running`);
+      return;
+    }
+
+    console.log(`[Scheduler] Starting ${this.platform} scheduler (interval: ${this.state.intervalMs}ms)`);
+
+    // Calculate next run time
+    this.state.nextScheduledRun = new Date(Date.now() + this.state.intervalMs);
+    this.notifyStateChange();
+
+    // Set up interval
+    this.intervalId = setInterval(() => {
+      this.runScrape();
+    }, this.state.intervalMs);
+
+    // Run immediately on start
+    this.runScrape();
+  }
+
+  /**
+   * Stop the scheduler
+   */
+  stop(): void {
+    if (this.intervalId) {
+      clearInterval(this.intervalId);
+      this.intervalId = null;
+      this.state.nextScheduledRun = null;
+      console.log(`[Scheduler] ${this.platform} scheduler stopped`);
+      this.notifyStateChange();
+    }
+  }
+
+  /**
+   * Run a single scrape cycle
+   */
+  private async runScrape(): Promise<void> {
+    if (this.state.isRunning) {
+      console.log(`[Scheduler] ${this.platform} scrape already in progress, skipping`);
+      return;
+    }
+
+    this.state.isRunning = true;
+    this.notifyStateChange();
+
+    const startTime = new Date();
+    console.log(`[Scheduler] ${this.platform} scrape starting at ${startTime.toISOString()}`);
+
+    try {
+      const result = await this.scrapeFunction();
+
+      const endTime = new Date();
+      this.state.lastRunResult = {
+        platform: this.platform,
+        startTime,
+        endTime,
+        success: result.success,
+        leadsFound: result.leadsFound,
+        error: result.error,
+        retryAttempts: 0, // Retry attempts are handled within scrapeFunction
+      };
+
+      if (!result.success && result.error) {
+        // Log error to API so it's visible in the dashboard
+        await logScraperErrorToAPI(
+          this.apiBaseUrl,
+          this.platform,
+          result.error,
+          this.authToken
+        );
+      }
+
+      console.log(`[Scheduler] ${this.platform} scrape completed: ${result.success ? 'SUCCESS' : 'FAILED'}`);
+
+    } catch (error) {
+      // Catch any unexpected errors to ensure scheduler continues
+      const endTime = new Date();
+      const errorMessage = error instanceof Error ? error.message : String(error);
+
+      this.state.lastRunResult = {
+        platform: this.platform,
+        startTime,
+        endTime,
+        success: false,
+        leadsFound: 0,
+        error: errorMessage,
+        retryAttempts: 0,
+      };
+
+      // Log error to API
+      await logScraperErrorToAPI(
+        this.apiBaseUrl,
+        this.platform,
+        errorMessage,
+        this.authToken
+      );
+
+      console.error(`[Scheduler] ${this.platform} scrape error (scheduler continues):`, errorMessage);
+    } finally {
+      // Always update state and schedule next run
+      this.state.isRunning = false;
+      this.state.nextScheduledRun = new Date(Date.now() + this.state.intervalMs);
+      this.notifyStateChange();
+    }
+  }
+
+  /**
+   * Notify listeners of state change
+   */
+  private notifyStateChange(): void {
+    this.onStateChange?.(this.getState());
+  }
 }
 
 // =============================================================================
@@ -301,9 +544,9 @@ export async function fetchBrowserFingerprint(
       return null;
     }
 
-    const data = await response.json();
+    const data = (await response.json()) as { fingerprint: BrowserFingerprint };
     console.log('[Fingerprint] Successfully fetched fingerprint');
-    return data.fingerprint as BrowserFingerprint;
+    return data.fingerprint;
   } catch (error) {
     console.error('[Fingerprint] Failed to fetch:', error);
     return null;

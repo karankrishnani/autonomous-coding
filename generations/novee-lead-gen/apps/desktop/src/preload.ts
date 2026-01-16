@@ -66,6 +66,15 @@ interface SearchResult {
 }
 
 /**
+ * Manual scrape result
+ */
+interface ManualScrapeResult {
+  success: boolean;
+  leadsFound?: number;
+  error?: string;
+}
+
+/**
  * API exposed to the renderer process
  */
 interface ElectronAPI {
@@ -76,10 +85,13 @@ interface ElectronAPI {
   getWebAppUrl: () => Promise<string>;
 
   // Slack operations
-  openSlackLogin: () => Promise<{ success: boolean }>;
+  openSlackLogin: () => Promise<{ success: boolean; error?: string }>;
   getSlackWorkspaces: () => Promise<WorkspaceInfo[]>;
   searchSlackKeywords: (keywords: string, lastScrapeDate?: number) => Promise<SearchResult[]>;
   openSlackMessage: (url: string) => Promise<{ success: boolean }>;
+
+  // Scraping operations
+  manualScrape: () => Promise<ManualScrapeResult>;
 
   // Fingerprint operations
   getFingerprint: () => Promise<Record<string, unknown> | null>;
@@ -103,6 +115,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   searchSlackKeywords: (keywords: string, lastScrapeDate?: number) =>
     ipcRenderer.invoke('search-slack-keywords', keywords, lastScrapeDate),
   openSlackMessage: (url: string) => ipcRenderer.invoke('open-slack-message', url),
+
+  // Scraping operations
+  manualScrape: () => ipcRenderer.invoke('manual-scrape'),
 
   // Fingerprint operations
   getFingerprint: () => ipcRenderer.invoke('get-fingerprint'),

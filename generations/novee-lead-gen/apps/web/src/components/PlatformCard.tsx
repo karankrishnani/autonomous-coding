@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { PlatformConnection, PlatformConnectionStatus } from '@/lib/platforms';
 
 interface PlatformCardProps {
@@ -117,6 +118,14 @@ export function PlatformCard({
           {available ? (
             isConnected ? (
               <div className="flex items-center gap-2">
+                {connectionId && (
+                  <Link
+                    href={`/platforms/${connectionId}`}
+                    className="px-3 py-2 text-sm text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors"
+                  >
+                    View Details
+                  </Link>
+                )}
                 <button className="btn-secondary">
                   Reconnect
                 </button>
@@ -127,7 +136,21 @@ export function PlatformCard({
                   Disconnect
                 </button>
               </div>
-            ) : isDisconnected || isDegraded ? (
+            ) : isDegraded ? (
+              <div className="flex items-center gap-2">
+                {connectionId && (
+                  <Link
+                    href={`/platforms/${connectionId}`}
+                    className="px-3 py-2 text-sm text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors"
+                  >
+                    View Details
+                  </Link>
+                )}
+                <button className="btn-primary">
+                  Reconnect
+                </button>
+              </div>
+            ) : isDisconnected ? (
               <button className="btn-primary">
                 Reconnect
               </button>

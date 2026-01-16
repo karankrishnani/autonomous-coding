@@ -30,6 +30,13 @@ const logoutBtn = document.getElementById('logout-btn') as HTMLButtonElement | n
 const connectSlackBtn = document.getElementById('connect-slack-btn') as HTMLButtonElement | null;
 const slackStatus = document.getElementById('slack-status') as HTMLSpanElement | null;
 
+// Scrape elements
+const scrapeNowBtn = document.getElementById('scrape-now-btn') as HTMLButtonElement | null;
+const scrapeProgress = document.getElementById('scrape-progress') as HTMLElement | null;
+const scrapeStatusText = document.getElementById('scrape-status-text') as HTMLElement | null;
+const scrapeProgressFill = document.getElementById('scrape-progress-fill') as HTMLElement | null;
+const scrapeDetails = document.getElementById('scrape-details') as HTMLElement | null;
+
 // =============================================================================
 // User Interface
 // =============================================================================
@@ -215,10 +222,16 @@ function updateSlackStatus(connected: boolean, workspaceCount?: number) {
     slackStatus.className = 'platform-status status-disconnected';
     connectSlackBtn.textContent = 'Connect';
   }
+
+  // Show/hide scrape button based on connection status
+  updateScrapeButtonVisibility(connected);
 }
 
 /**
  * Handle Slack connection button click
+ *
+ * Security: The main process validates the session before allowing connection.
+ * If no valid session, it returns an error and the user is redirected to login.
  */
 async function handleConnectSlack() {
   if (!connectSlackBtn) return;
@@ -243,6 +256,19 @@ async function handleConnectSlack() {
         const workspaces = await window.electronAPI.getSlackWorkspaces();
         updateSlackStatus(workspaces.length > 0, workspaces.length);
       }, 1000);
+    } else if (result.error) {
+      // Handle auth error - show login view if session is invalid
+      console.log('Slack connection error:', result.error);
+      if (result.error.includes('log in')) {
+        // Session expired or not logged in - redirect to login
+        showLoginView();
+      } else {
+        // Show error in status
+        if (slackStatus) {
+          slackStatus.textContent = 'Connection failed';
+          slackStatus.className = 'platform-status status-error';
+        }
+      }
     }
   } catch (error) {
     console.error('Failed to connect to Slack:', error);
@@ -273,6 +299,105 @@ async function handleWebAppLinkClick(event: Event) {
 }
 
 // =============================================================================
+// Scrape Handlers
+// =============================================================================
+
+/**
+ * Show/hide the scrape now button based on connection status
+ */
+function updateScrapeButtonVisibility(isConnected: boolean) {
+  if (scrapeNowBtn) {
+    if (isConnected) {
+      scrapeNowBtn.classList.remove('hidden');
+    } else {
+      scrapeNowBtn.classList.add('hidden');
+    }
+  }
+}
+
+/**
+ * Update scrape progress UI
+ */
+function updateScrapeProgress(status: 'idle' | 'running' | 'completed' | 'failed', progress: number, details?: string) {
+  if (!scrapeProgress) return;
+
+  if (status === 'idle') {
+    scrapeProgress.classList.add('hidden');
+    return;
+  }
+
+  scrapeProgress.classList.remove('hidden');
+  scrapeProgress.classList.remove('completed', 'failed');
+
+  if (status === 'completed') {
+    scrapeProgress.classList.add('completed');
+    if (scrapeStatusText) scrapeStatusText.textContent = 'Scrape completed!';
+    if (scrapeProgressFill) scrapeProgressFill.style.width = '100%';
+    if (scrapeDetails) scrapeDetails.textContent = details || 'Successfully scanned for leads';
+  } else if (status === 'failed') {
+    scrapeProgress.classList.add('failed');
+    if (scrapeStatusText) scrapeStatusText.textContent = 'Scrape failed';
+    if (scrapeProgressFill) scrapeProgressFill.style.width = '100%';
+    if (scrapeDetails) scrapeDetails.textContent = details || 'An error occurred during scraping';
+  } else {
+    // Running
+    if (scrapeStatusText) scrapeStatusText.textContent = 'Scraping in progress...';
+    if (scrapeProgressFill) scrapeProgressFill.style.width = `${progress}%`;
+    if (scrapeDetails) scrapeDetails.textContent = details || 'Searching for leads...';
+  }
+}
+
+/**
+ * Handle manual scrape button click
+ *
+ * Triggers an immediate scrape of connected platforms
+ */
+async function handleScrapeNow() {
+  if (!scrapeNowBtn || !window.electronAPI) return;
+
+  // Disable button while scraping
+  scrapeNowBtn.disabled = true;
+  scrapeNowBtn.textContent = 'Scraping...';
+
+  // Show progress UI
+  updateScrapeProgress('running', 10, 'Initializing scrape...');
+
+  try {
+    // Simulate progress updates (in production, this would come from IPC events)
+    updateScrapeProgress('running', 25, 'Connecting to workspaces...');
+
+    // Call the manual scrape IPC handler
+    const result = await window.electronAPI.manualScrape();
+
+    if (result.success) {
+      updateScrapeProgress('completed', 100, `Found ${result.leadsFound || 0} potential leads`);
+
+      // Hide progress after 3 seconds
+      setTimeout(() => {
+        updateScrapeProgress('idle', 0);
+      }, 3000);
+    } else {
+      updateScrapeProgress('failed', 100, result.error || 'Scrape failed');
+
+      // Hide progress after 5 seconds
+      setTimeout(() => {
+        updateScrapeProgress('idle', 0);
+      }, 5000);
+    }
+  } catch (error) {
+    console.error('Manual scrape error:', error);
+    updateScrapeProgress('failed', 100, 'An unexpected error occurred');
+
+    setTimeout(() => {
+      updateScrapeProgress('idle', 0);
+    }, 5000);
+  } finally {
+    scrapeNowBtn.disabled = false;
+    scrapeNowBtn.textContent = 'Scrape Now';
+  }
+}
+
+// =============================================================================
 // Initialization
 // =============================================================================
 
@@ -298,6 +423,11 @@ function init() {
   // Set up Slack connection handler
   if (connectSlackBtn) {
     connectSlackBtn.addEventListener('click', handleConnectSlack);
+  }
+
+  // Set up Scrape Now button handler
+  if (scrapeNowBtn) {
+    scrapeNowBtn.addEventListener('click', handleScrapeNow);
   }
 
   // Listen for workspace capture events from main process

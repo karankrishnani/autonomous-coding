@@ -26,8 +26,8 @@ export async function GET() {
     }
 
     // Get keyword groups scoped to this user (RLS)
-    const keywordGroups = getKeywordGroupsByUserId(user.id);
-    const allKeywords = getAllKeywordsForUser(user.id);
+    const keywordGroups = await getKeywordGroupsByUserId(user.id);
+    const allKeywords = await getAllKeywordsForUser(user.id);
 
     return NextResponse.json({
       keyword_groups: keywordGroups,

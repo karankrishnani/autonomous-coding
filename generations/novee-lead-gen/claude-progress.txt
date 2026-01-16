@@ -1910,3 +1910,140 @@ The Novee Lead Generation Platform MVP is **COMPLETE**:
 ---
 
 Session 23 completed successfully. 3 regression tests passed. App is in working state with 252/252 features passing (100.0%).
+
+---
+
+# Session 24 Progress
+
+## Session Date
+January 16, 2026 (continued)
+
+## Completed Tasks
+
+### 1. Regression Testing (3 features verified)
+All regression tests passed:
+- ✅ #174: Dashboard shows active platforms count
+  - Verified "0 Active Platforms" displays correctly with no connected platforms
+- ✅ #89: Direct URL to deleted entity shows not found
+  - Verified "Failed to load lead" message with helpful text
+  - "Back to Leads" button provided for navigation
+- ✅ #119: Loading spinner shown during data fetch
+  - Observed loading state transition on leads page
+
+### 2. Bug Fix: Keywords API Async/Await
+Discovered and fixed a critical bug during regression testing:
+- The keywords API route was calling async functions without await
+- Fixed `getKeywordGroupsByUserId()` and `getAllKeywordsForUser()` to use await
+- This prevented "userKeywords.map is not a function" error on leads page
+
+### 3. Feature #262: Desktop app requires login before Slack connection
+**Security enhancement to desktop app:**
+- Added session validation in `open-slack-login` IPC handler
+- Returns error if no valid session exists: "Please log in first to connect your Slack account"
+- Renderer handles auth errors by redirecting to login view
+- Added `status-error` CSS class for error states
+
+### 4. Feature #277: Desktop App Scraper Error Handling
+**Scraper resilience improvements:**
+- Added `logScraperErrorToAPI()` function to report errors to backend
+- Created `ScraperScheduler` class for scheduled scrapes
+- Scheduler continues running even after errors
+- Errors logged to API and next run proceeds as scheduled
+- Added `/api/scraper/test-scheduler` endpoint for testing
+
+### 5. Feature #276: Web App Scrape History View
+**Platform detail page with scrape history:**
+- Created `/platforms/[connectionId]/page.tsx` detail page
+- Created `scrape_logs` database migration
+- Added `scrape-logs.ts` lib with CRUD functions
+- Shows stats: total scrapes, successful, messages found, leads created
+- Shows history list with status indicators, timestamps, duration
+- Failed scrapes show error messages
+- Updated PlatformCard with "View Details" link
+
+## Features Marked as Passing This Session
+- #262: Desktop app requires login before Slack connection
+- #277: Desktop App: Scraper Error Handling
+- #276: Web App: Scrape History View
+
+## Current Feature Stats
+```
+Passing: 265/279 (95.0%)
+Remaining: 14 features
+```
+
+Note: Feature count increased from 252 to 279 (27 new features added).
+
+## Files Created This Session
+- `apps/web/src/app/(dashboard)/platforms/[connectionId]/page.tsx` - Platform detail page
+- `apps/web/src/lib/scrape-logs.ts` - Scrape logs data module
+- `apps/web/src/app/api/scraper/test-scheduler/route.ts` - Scheduler test endpoint
+- `supabase/migrations/00015_create_scrape_logs_table.sql` - Scrape logs migration
+
+## Files Modified This Session
+- `apps/web/src/app/api/keywords/route.ts` - Fixed async/await bug
+- `apps/desktop/src/main.ts` - Added session validation for Slack connection
+- `apps/desktop/src/renderer/renderer.ts` - Added auth error handling
+- `apps/desktop/src/renderer/styles.css` - Added status-error class
+- `apps/desktop/src/scraper.ts` - Added error logging and scheduler
+- `apps/web/src/components/PlatformCard.tsx` - Added "View Details" link
+
+## Git Commits This Session
+- `feat: Add desktop app login requirement for Slack connection (#262)`
+- `feat: Add desktop app scraper error handling and scheduler (#277)`
+- `feat: Add web app scrape history view (#276)`
+
+## Summary
+This session implemented 3 new features and fixed a bug:
+1. Security enhancement for desktop app Slack connection
+2. Scraper error handling with scheduler that continues after failures
+3. Scrape history view on platform detail pages
+
+The app is now at 95.0% feature completion (265/279 features passing).
+
+## Next Steps
+- Continue implementing remaining 14 features
+- Focus on desktop app and scraper functionality
+
+---
+
+Session 24 completed successfully. 3 features implemented and verified. App is in working state with 265/279 features passing (95.0%).
+
+---
+
+# Session 25 Progress (Continuation)
+
+## Session Date
+January 16, 2026 (continued from Session 24)
+
+## Completed Tasks
+
+### 1. Feature #275: Desktop App Manual Scrape Button
+**Manual scrape trigger from desktop app:**
+- Added "Scrape Now" button to desktop app UI (hidden until Slack connected)
+- Added scrape progress section with animated progress bar
+- Added `updateScrapeProgress()` function for status display (idle/running/completed/failed)
+- Added `handleScrapeNow()` click handler in renderer
+- Added `manualScrape` API to preload script
+- Added `manual-scrape` IPC handler in main process with session validation
+- Extracted `getSlackWorkspaces()` as reusable async function
+
+## Features Marked as Passing This Session
+- #275: Desktop App: Manual Scrape Button
+
+## Files Modified This Session
+- `apps/desktop/src/main.ts` - Added manual-scrape IPC handler, extracted getSlackWorkspaces()
+- `apps/desktop/src/preload.ts` - Added manualScrape API
+- `apps/desktop/src/renderer/index.html` - Added scrape button and progress UI
+- `apps/desktop/src/renderer/renderer.ts` - Added scrape handling functions
+- `apps/desktop/src/renderer/styles.css` - Added scrape progress styles
+
+## Git Commits This Session
+- `feat: Add manual scrape button to desktop app (#275)`
+
+## Current Feature Stats
+```
+Passing: 266/279 (95.3%)
+Remaining: 13 features
+```
+

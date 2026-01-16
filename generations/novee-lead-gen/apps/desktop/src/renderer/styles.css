@@ -164,6 +164,10 @@ h2 {
   color: var(--warning);
 }
 
+.status-error {
+  color: var(--error);
+}
+
 /* Buttons */
 .btn {
   padding: 0.75rem 1.5rem;
@@ -367,4 +371,80 @@ h2 {
   to {
     transform: rotate(360deg);
   }
+}
+
+/* Platform Actions */
+.platform-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+/* Scrape Progress Section */
+.scrape-progress {
+  background: white;
+  padding: 1.5rem;
+  border-radius: 12px;
+  border: 1px solid var(--gray-200);
+  margin-bottom: 1rem;
+}
+
+.scrape-progress-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.scrape-icon {
+  font-size: 1.25rem;
+  animation: spin 1s linear infinite;
+  display: inline-block;
+}
+
+.scrape-progress.completed .scrape-icon {
+  animation: none;
+}
+
+.scrape-status-text {
+  font-weight: 600;
+  color: var(--gray-900);
+}
+
+.scrape-progress-bar {
+  height: 8px;
+  background: var(--gray-200);
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 0.75rem;
+}
+
+.scrape-progress-fill {
+  height: 100%;
+  background: var(--primary);
+  border-radius: 4px;
+  transition: width 0.3s ease-out;
+  width: 0%;
+}
+
+.scrape-progress.completed .scrape-progress-fill {
+  background: var(--success);
+  width: 100%;
+}
+
+.scrape-progress.failed .scrape-progress-fill {
+  background: var(--error);
+}
+
+.scrape-details {
+  font-size: 0.875rem;
+  color: var(--gray-500);
+  margin: 0;
+}
+
+.scrape-progress.completed .scrape-details {
+  color: var(--success);
+}
+
+.scrape-progress.failed .scrape-details {
+  color: var(--error);
 }

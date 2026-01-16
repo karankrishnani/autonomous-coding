@@ -67,7 +67,22 @@
                     <span id="slack-status" class="platform-status status-disconnected">Not Connected</span>
                   </div>
                 </div>
-                <button id="connect-slack-btn" class="btn btn-primary">Connect</button>
+                <div class="platform-actions">
+                  <button id="scrape-now-btn" class="btn btn-secondary hidden">Scrape Now</button>
+                  <button id="connect-slack-btn" class="btn btn-primary">Connect</button>
+                </div>
+              </div>
+
+              <!-- Scraping Progress Section -->
+              <div id="scrape-progress" class="scrape-progress hidden">
+                <div class="scrape-progress-header">
+                  <span class="scrape-icon">⟳</span>
+                  <span id="scrape-status-text">Scraping in progress...</span>
+                </div>
+                <div class="scrape-progress-bar">
+                  <div id="scrape-progress-fill" class="scrape-progress-fill"></div>
+                </div>
+                <p id="scrape-details" class="scrape-details">Searching for leads...</p>
               </div>
 
               <div class="platform-card">

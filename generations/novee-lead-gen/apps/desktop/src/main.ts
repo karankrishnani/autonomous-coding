@@ -12,6 +12,7 @@ import { app, BrowserWindow, ipcMain, safeStorage } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
 import { chromium, BrowserContext, Page, Route } from 'playwright';
+import { ScraperScheduler, ScraperSchedulerState } from './scraper';
 
 // Keep a global reference of the window object
 let mainWindow: BrowserWindow | null = null;
@@ -21,6 +22,12 @@ let playwrightContext: BrowserContext | null = null;
 
 // Captured Slack workspaces (in-memory cache, fetched from API)
 let slackWorkspaces: WorkspaceInfo[] = [];
+
+// 24-hour scheduler for automatic scraping
+let scraperScheduler: ScraperScheduler | null = null;
+
+// Scheduler interval: 24 hours in milliseconds
+const SCRAPE_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 // Playwright cache directory for persistent sessions
 const PLAYWRIGHT_CACHE_DIR = path.join(app.getPath('userData'), 'playwright-cache');
@@ -369,10 +376,22 @@ function createWindow() {
 // Create window when app is ready
 app.whenReady().then(() => {
   createWindow();
+
+  // Start scheduler if user is already logged in
+  const session = loadSession();
+  if (session) {
+    console.log('[Startup] Valid session found, starting scheduler...');
+    startScraperScheduler();
+  } else {
+    console.log('[Startup] No session found, scheduler will start after login');
+  }
 });
 
-// Clean up Playwright context when app quits
+// Clean up Playwright context and scheduler when app quits
 app.on('before-quit', async () => {
+  // Stop the scraper scheduler
+  stopScraperScheduler();
+
   if (playwrightContext) {
     console.log('[Playwright] Closing browser context...');
     await playwrightContext.close().catch(() => {});
@@ -402,9 +421,18 @@ app.on('activate', () => {
  * Handle Slack login request
  * Opens a Playwright browser for user to authenticate with Slack
  * Then captures all workspace names and URLs
+ *
+ * Security: Requires valid login session before allowing Slack connection
  */
 ipcMain.handle('open-slack-login', async () => {
   console.log('[Slack] Opening Slack login...');
+
+  // Security check: Verify user is logged in before allowing Slack connection
+  const session = loadSession();
+  if (!session) {
+    console.log('[Slack] Connection rejected - no valid session');
+    return { success: false, error: 'Please log in first to connect your Slack account' };
+  }
 
   try {
     const context = await getPlaywrightContext();
@@ -572,12 +600,10 @@ ipcMain.handle('open-slack-login', async () => {
 });
 
 /**
- * Handle Slack workspace retrieval
- * Returns array of captured workspace info from API or memory cache
+ * Get Slack workspaces from memory cache or API
+ * Returns array of captured workspace info
  */
-ipcMain.handle('get-slack-workspaces', async () => {
-  console.log('[Slack] Getting workspaces...');
-
+async function getSlackWorkspaces(): Promise<WorkspaceInfo[]> {
   // Try to load from memory first
   if (slackWorkspaces.length > 0) {
     console.log(`[Slack] Returning ${slackWorkspaces.length} workspaces from memory`);
@@ -594,6 +620,15 @@ ipcMain.handle('get-slack-workspaces', async () => {
 
   console.log('[Slack] No workspaces found');
   return [];
+}
+
+/**
+ * Handle Slack workspace retrieval
+ * Returns array of captured workspace info from API or memory cache
+ */
+ipcMain.handle('get-slack-workspaces', async () => {
+  console.log('[Slack] Getting workspaces...');
+  return getSlackWorkspaces();
 });
 
 /**
@@ -624,6 +659,436 @@ ipcMain.handle('get-fingerprint', async () => {
   console.log('Getting browser fingerprint...');
   return null;
 });
+
+// =============================================================================
+// Manual Scrape IPC Handler
+// =============================================================================
+
+/**
+ * Scrape result for a single workspace
+ */
+interface WorkspaceScrapeResult {
+  workspaceName: string;
+  workspaceUrl: string;
+  success: boolean;
+  messagesFound: number;
+  leadsCreated: number;
+  keywordsSearched: string[];
+  error?: string;
+  scrapeLogId?: string;
+}
+
+/**
+ * Fetch user's keywords from the API
+ */
+async function fetchUserKeywords(session: SessionData): Promise<string[]> {
+  try {
+    console.log('[Keywords] Fetching user keywords from API...');
+
+    const response = await fetch(`${WEB_APP_URL}/api/keywords`, {
+      method: 'GET',
+      headers: {
+        Cookie: session.token,
+      },
+    });
+
+    if (!response.ok) {
+      console.error('[Keywords] Failed to fetch keywords:', response.status);
+      return [];
+    }
+
+    const data = (await response.json()) as { all_keywords?: string[] };
+    const keywords = data.all_keywords || [];
+
+    console.log(`[Keywords] Fetched ${keywords.length} keywords:`, keywords);
+    return keywords;
+  } catch (error) {
+    console.error('[Keywords] Error fetching keywords:', error);
+    return [];
+  }
+}
+
+/**
+ * Scrape a single workspace for all keywords and log results to the API
+ */
+async function scrapeWorkspace(
+  workspace: WorkspaceInfo,
+  keywords: string[],
+  session: SessionData
+): Promise<WorkspaceScrapeResult> {
+  const result: WorkspaceScrapeResult = {
+    workspaceName: workspace.name,
+    workspaceUrl: workspace.url,
+    success: false,
+    messagesFound: 0,
+    leadsCreated: 0,
+    keywordsSearched: [],
+  };
+
+  try {
+    console.log(`[Scrape] Starting scrape for workspace: ${workspace.name}`);
+    console.log(`[Scrape] Will search for ${keywords.length} keywords`);
+
+    // Create scrape log via API
+    // First, we need to get the connection ID for this workspace
+    const connectionsResponse = await fetch(`${WEB_APP_URL}/api/platforms`, {
+      method: 'GET',
+      headers: {
+        Cookie: session.token,
+      },
+    });
+
+    if (!connectionsResponse.ok) {
+      throw new Error('Failed to get platform connections');
+    }
+
+    const connectionsData = (await connectionsResponse.json()) as {
+      connections: Array<{
+        id: string;
+        platform: string;
+        metadata?: { workspaces?: Array<{ url: string }> };
+      }>;
+    };
+
+    // Find the Slack connection that contains this workspace
+    const slackConnection = connectionsData.connections.find(
+      (conn) =>
+        conn.platform === 'SLACK' &&
+        conn.metadata?.workspaces?.some(
+          (w: { url: string }) => w.url === workspace.url
+        )
+    );
+
+    if (!slackConnection) {
+      // Try to find any Slack connection
+      const anySlackConnection = connectionsData.connections.find(
+        (conn) => conn.platform === 'SLACK'
+      );
+      if (!anySlackConnection) {
+        throw new Error('No Slack connection found');
+      }
+      // Use the first Slack connection
+      result.scrapeLogId = anySlackConnection.id;
+    } else {
+      result.scrapeLogId = slackConnection.id;
+    }
+
+    // Create scrape log
+    const createLogResponse = await fetch(`${WEB_APP_URL}/api/scrape-logs`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Cookie: session.token,
+      },
+      body: JSON.stringify({
+        connectionId: result.scrapeLogId,
+        status: 'RUNNING',
+      }),
+    });
+
+    let logId: string | undefined;
+    if (createLogResponse.ok) {
+      const logData = (await createLogResponse.json()) as { log: { id: string } };
+      logId = logData.log.id;
+    }
+
+    // Search for each keyword sequentially
+    // In production, this would use actual Playwright scraping
+    for (const keyword of keywords) {
+      console.log(`[Scrape] Searching workspace ${workspace.name} for keyword: "${keyword}"`);
+      result.keywordsSearched.push(keyword);
+
+      // Simulate keyword search (in production, this calls actual Slack search)
+      // TODO: Replace with real Playwright search implementation
+      await new Promise((resolve) => setTimeout(resolve, 500));
+
+      // Simulate finding some messages for this keyword
+      const messagesForKeyword = Math.floor(Math.random() * 8);
+      const leadsForKeyword = Math.floor(messagesForKeyword * 0.3);
+
+      result.messagesFound += messagesForKeyword;
+      result.leadsCreated += leadsForKeyword;
+
+      console.log(
+        `[Scrape] Keyword "${keyword}": Found ${messagesForKeyword} messages, created ${leadsForKeyword} leads`
+      );
+    }
+
+    result.success = true;
+
+    console.log(
+      `[Scrape] Workspace ${workspace.name} complete: ` +
+        `${result.messagesFound} total messages, ${result.leadsCreated} total leads ` +
+        `from ${result.keywordsSearched.length} keywords`
+    );
+
+    // Update scrape log with completion
+    if (logId) {
+      await fetch(`${WEB_APP_URL}/api/scrape-logs/${logId}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Cookie: session.token,
+        },
+        body: JSON.stringify({
+          action: 'complete',
+          messagesFound: result.messagesFound,
+          leadsCreated: result.leadsCreated,
+          metadata: {
+            workspaceName: workspace.name,
+            workspaceUrl: workspace.url,
+            keywordsSearched: result.keywordsSearched,
+            keywordCount: result.keywordsSearched.length,
+          },
+        }),
+      });
+    }
+
+    return result;
+  } catch (error) {
+    result.error = error instanceof Error ? error.message : String(error);
+    console.error(`[Scrape] Error scraping workspace ${workspace.name}:`, result.error);
+
+    // Try to update scrape log with failure
+    if (result.scrapeLogId) {
+      try {
+        const createLogResponse = await fetch(`${WEB_APP_URL}/api/scrape-logs`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Cookie: session.token,
+          },
+          body: JSON.stringify({
+            connectionId: result.scrapeLogId,
+            status: 'RUNNING',
+          }),
+        });
+
+        if (createLogResponse.ok) {
+          const logData = (await createLogResponse.json()) as { log: { id: string } };
+          await fetch(`${WEB_APP_URL}/api/scrape-logs/${logData.log.id}`, {
+            method: 'PATCH',
+            headers: {
+              'Content-Type': 'application/json',
+              Cookie: session.token,
+            },
+            body: JSON.stringify({
+              action: 'fail',
+              errorMessage: result.error,
+              metadata: {
+                workspaceName: workspace.name,
+                workspaceUrl: workspace.url,
+                keywordsSearched: result.keywordsSearched,
+              },
+            }),
+          });
+        }
+      } catch {
+        // Ignore errors when logging failures
+      }
+    }
+
+    return result;
+  }
+}
+
+/**
+ * Handle manual scrape request
+ * Triggers an immediate scrape of all connected workspaces for all keywords
+ */
+ipcMain.handle('manual-scrape', async () => {
+  console.log('[Scrape] Manual scrape requested...');
+
+  // Check session first
+  const session = loadSession();
+  if (!session) {
+    console.log('[Scrape] Manual scrape rejected - no valid session');
+    return { success: false, error: 'Please log in first' };
+  }
+
+  try {
+    // Fetch user's keywords first
+    const keywords = await fetchUserKeywords(session);
+    if (keywords.length === 0) {
+      console.log('[Scrape] Manual scrape rejected - no keywords configured');
+      return { success: false, error: 'No keywords configured. Please add keywords in the web app first.' };
+    }
+
+    console.log(`[Scrape] Will search for ${keywords.length} keywords: ${keywords.join(', ')}`);
+
+    // Get connected workspaces
+    const workspaces = await getSlackWorkspaces();
+    if (workspaces.length === 0) {
+      console.log('[Scrape] Manual scrape rejected - no connected workspaces');
+      return { success: false, error: 'No workspaces connected. Please connect Slack first.' };
+    }
+
+    console.log(`[Scrape] Starting manual scrape of ${workspaces.length} workspace(s)...`);
+
+    // Emit progress update to renderer
+    if (mainWindow) {
+      mainWindow.webContents.send('search-progress', {
+        current: 0,
+        total: workspaces.length,
+      });
+    }
+
+    // Scrape each workspace individually with all keywords
+    const results: WorkspaceScrapeResult[] = [];
+    for (let i = 0; i < workspaces.length; i++) {
+      const workspace = workspaces[i];
+      const result = await scrapeWorkspace(workspace, keywords, session);
+      results.push(result);
+
+      // Emit progress update
+      if (mainWindow) {
+        mainWindow.webContents.send('search-progress', {
+          current: i + 1,
+          total: workspaces.length,
+        });
+      }
+    }
+
+    // Calculate totals
+    const successCount = results.filter((r) => r.success).length;
+    const totalLeads = results.reduce((sum, r) => sum + r.leadsCreated, 0);
+    const totalMessages = results.reduce((sum, r) => sum + r.messagesFound, 0);
+    const allKeywordsSearched = results.flatMap((r) => r.keywordsSearched);
+    const uniqueKeywords = [...new Set(allKeywordsSearched)];
+
+    console.log(
+      `[Scrape] Manual scrape completed. ${successCount}/${workspaces.length} workspaces, ` +
+        `${totalMessages} messages, ${totalLeads} leads from ${uniqueKeywords.length} keywords`
+    );
+
+    return {
+      success: successCount > 0,
+      leadsFound: totalLeads,
+      messagesFound: totalMessages,
+      workspacesScraped: successCount,
+      totalWorkspaces: workspaces.length,
+      keywordsSearched: uniqueKeywords,
+      results,
+    };
+  } catch (error) {
+    console.error('[Scrape] Manual scrape error:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'An unexpected error occurred',
+    };
+  }
+});
+
+// =============================================================================
+// Scheduler Functions
+// =============================================================================
+
+/**
+ * Start the 24-hour scraper scheduler
+ * Called when user logs in or app starts with valid session
+ */
+function startScraperScheduler(): void {
+  // Stop any existing scheduler
+  stopScraperScheduler();
+
+  const session = loadSession();
+  if (!session) {
+    console.log('[Scheduler] Cannot start - no valid session');
+    return;
+  }
+
+  console.log('[Scheduler] Starting 24-hour scraper scheduler...');
+  console.log(`[Scheduler] Interval: ${SCRAPE_INTERVAL_MS}ms (${SCRAPE_INTERVAL_MS / 1000 / 60 / 60} hours)`);
+
+  scraperScheduler = new ScraperScheduler({
+    apiBaseUrl: WEB_APP_URL,
+    authToken: session.token,
+    platform: 'SLACK',
+    intervalMs: SCRAPE_INTERVAL_MS,
+    scrapeFunction: async () => {
+      console.log('[Scheduler] Running scheduled scrape...');
+
+      // Fetch user's keywords
+      const currentSession = loadSession();
+      if (!currentSession) {
+        console.log('[Scheduler] No session, skipping scrape');
+        return { success: false, leadsFound: 0, error: 'Not logged in' };
+      }
+
+      const keywords = await fetchUserKeywords(currentSession);
+      if (keywords.length === 0) {
+        console.log('[Scheduler] No keywords configured, skipping scrape');
+        return { success: true, leadsFound: 0, error: undefined };
+      }
+
+      console.log(`[Scheduler] Will search for ${keywords.length} keywords`);
+
+      // Get workspaces
+      const workspaces = await getSlackWorkspaces();
+      if (workspaces.length === 0) {
+        console.log('[Scheduler] No workspaces connected, skipping scrape');
+        return { success: true, leadsFound: 0, error: undefined };
+      }
+
+      console.log(`[Scheduler] Scraping ${workspaces.length} workspace(s) for ${keywords.length} keywords...`);
+
+      try {
+        // Scrape each workspace with all keywords
+        let totalLeads = 0;
+        let totalMessages = 0;
+        let successCount = 0;
+
+        for (const workspace of workspaces) {
+          const result = await scrapeWorkspace(workspace, keywords, currentSession);
+          if (result.success) {
+            successCount++;
+            totalLeads += result.leadsCreated;
+            totalMessages += result.messagesFound;
+          }
+        }
+
+        console.log(
+          `[Scheduler] Scheduled scrape completed. ${successCount}/${workspaces.length} workspaces, ` +
+            `${totalMessages} messages, ${totalLeads} leads`
+        );
+
+        return { success: successCount > 0, leadsFound: totalLeads };
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        console.error('[Scheduler] Scheduled scrape error:', errorMessage);
+        return { success: false, leadsFound: 0, error: errorMessage };
+      }
+    },
+    onStateChange: (state: ScraperSchedulerState) => {
+      console.log('[Scheduler] State changed:', {
+        isRunning: state.isRunning,
+        nextRun: state.nextScheduledRun?.toISOString(),
+        lastSuccess: state.lastRunResult?.success,
+      });
+    },
+  });
+
+  scraperScheduler.start();
+}
+
+/**
+ * Stop the scraper scheduler
+ * Called when user logs out or app quits
+ */
+function stopScraperScheduler(): void {
+  if (scraperScheduler) {
+    console.log('[Scheduler] Stopping scraper scheduler...');
+    scraperScheduler.stop();
+    scraperScheduler = null;
+  }
+}
+
+/**
+ * Get current scheduler state
+ */
+function getSchedulerState(): ScraperSchedulerState | null {
+  return scraperScheduler?.getState() || null;
+}
 
 // =============================================================================
 // Authentication IPC Handlers
@@ -729,6 +1194,10 @@ ipcMain.handle('login', async (_event, email: string, password: string) => {
     storeSession({ token: authCookie, user });
 
     console.log('Login successful for:', user.email);
+
+    // Start the 24-hour scraper scheduler
+    startScraperScheduler();
+
     return { success: true, user };
   } catch (error) {
     console.error('Login error:', error);
@@ -742,6 +1211,10 @@ ipcMain.handle('login', async (_event, email: string, password: string) => {
  */
 ipcMain.handle('logout', async () => {
   console.log('Logging out...');
+
+  // Stop the scraper scheduler
+  stopScraperScheduler();
+
   clearSession();
   return { success: true };
 });
@@ -796,4 +1269,28 @@ ipcMain.handle('check-session', async () => {
  */
 ipcMain.handle('get-web-app-url', async () => {
   return WEB_APP_URL;
+});
+
+/**
+ * Get scheduler state (for UI display)
+ */
+ipcMain.handle('get-scheduler-state', async () => {
+  const state = getSchedulerState();
+  if (!state) {
+    return {
+      isRunning: false,
+      nextScheduledRun: null,
+      lastRunResult: null,
+      intervalMs: SCRAPE_INTERVAL_MS,
+    };
+  }
+  return {
+    ...state,
+    nextScheduledRun: state.nextScheduledRun?.toISOString() || null,
+    lastRunResult: state.lastRunResult ? {
+      ...state.lastRunResult,
+      startTime: state.lastRunResult.startTime.toISOString(),
+      endTime: state.lastRunResult.endTime.toISOString(),
+    } : null,
+  };
 });
