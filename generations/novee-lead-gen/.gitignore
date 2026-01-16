@@ -43,3 +43,8 @@ features.db
 # Temporary files
 *.tmp
 *.temp
+
+# Development data persistence
+.dev-data/
+
+.playwright-mcp/

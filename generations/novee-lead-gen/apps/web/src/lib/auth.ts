@@ -1,10 +1,12 @@
 /**
  * Simple auth library for development.
  * In production, this would use Supabase Auth.
- * For development, we store user data in cookies (base64 encoded).
+ * For development, we store user data in a JSON file for persistence.
  */
 
 import { cookies } from 'next/headers';
+import * as fs from 'fs';
+import * as path from 'path';
 
 export interface User {
   id: string;
@@ -17,13 +19,19 @@ interface StoredUser extends User {
   password: string;
 }
 
-// In-memory user store for development (persisted via cookies)
+// In-memory user store for development (persisted to JSON file)
 // In production, this would be Supabase
 const users: Map<string, StoredUser> = new Map();
 
 // Cookie names
 const SESSION_COOKIE = 'novee_session';
-const USERS_COOKIE = 'novee_dev_users';
+
+// File path for user persistence
+const DATA_DIR = path.join(process.cwd(), '.dev-data');
+const USERS_FILE = path.join(DATA_DIR, 'users.json');
+
+// Flag to track if users have been loaded
+let usersLoaded = false;
 
 /**
  * Generate a simple UUID-like ID
@@ -52,42 +60,46 @@ function hashPassword(password: string): string {
 }
 
 /**
- * Load users from cookie (development persistence)
+ * Ensure the data directory exists
  */
-async function loadUsersFromCookie(): Promise<void> {
+function ensureDataDir(): void {
+  if (!fs.existsSync(DATA_DIR)) {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+  }
+}
+
+/**
+ * Load users from JSON file (development persistence)
+ */
+function loadUsersFromFile(): void {
+  if (usersLoaded) return;
+
   try {
-    const cookieStore = await cookies();
-    const usersCookie = cookieStore.get(USERS_COOKIE)?.value;
-    if (usersCookie) {
-      const decoded = Buffer.from(usersCookie, 'base64').toString('utf-8');
-      const usersArray: StoredUser[] = JSON.parse(decoded);
+    if (fs.existsSync(USERS_FILE)) {
+      const data = fs.readFileSync(USERS_FILE, 'utf-8');
+      const usersArray: StoredUser[] = JSON.parse(data);
       users.clear();
       for (const user of usersArray) {
         users.set(user.id, user);
       }
     }
-  } catch {
-    // Ignore errors, start fresh
+  } catch (error) {
+    console.error('Error loading users from file:', error);
   }
+
+  usersLoaded = true;
 }
 
 /**
- * Save users to cookie (development persistence)
+ * Save users to JSON file (development persistence)
  */
-async function saveUsersToCookie(): Promise<void> {
+function saveUsersToFile(): void {
   try {
-    const cookieStore = await cookies();
+    ensureDataDir();
     const usersArray = Array.from(users.values());
-    const encoded = Buffer.from(JSON.stringify(usersArray)).toString('base64');
-    cookieStore.set(USERS_COOKIE, encoded, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 60 * 60 * 24 * 30, // 30 days
-      path: '/',
-    });
-  } catch {
-    // Ignore errors
+    fs.writeFileSync(USERS_FILE, JSON.stringify(usersArray, null, 2));
+  } catch (error) {
+    console.error('Error saving users to file:', error);
   }
 }
 
@@ -99,8 +111,8 @@ export async function createUser(
   password: string,
   name: string
 ): Promise<{ user?: User; error?: string }> {
-  // Load existing users
-  await loadUsersFromCookie();
+  // Load existing users from file
+  loadUsersFromFile();
 
   // Check if user exists
   const existingUser = Array.from(users.values()).find(u => u.email === email);
@@ -118,8 +130,8 @@ export async function createUser(
 
   users.set(user.id, user);
 
-  // Persist users
-  await saveUsersToCookie();
+  // Persist users to file
+  saveUsersToFile();
 
   // Return user without password
   const { password: _, ...safeUser } = user;
@@ -133,8 +145,8 @@ export async function authenticateUser(
   email: string,
   password: string
 ): Promise<{ user?: User; error?: string }> {
-  // Load existing users
-  await loadUsersFromCookie();
+  // Load existing users from file
+  loadUsersFromFile();
 
   const user = Array.from(users.values()).find(u => u.email === email);
 
@@ -170,6 +182,70 @@ export async function createSession(user: User): Promise<void> {
 }
 
 /**
+ * Validate that an object has all required User fields
+ */
+function isValidUser(obj: unknown): obj is User {
+  if (!obj || typeof obj !== 'object') {
+    return false;
+  }
+
+  const user = obj as Record<string, unknown>;
+
+  // Check all required fields exist and are non-empty strings
+  if (typeof user.id !== 'string' || user.id.trim() === '') {
+    return false;
+  }
+  if (typeof user.email !== 'string' || user.email.trim() === '') {
+    return false;
+  }
+  if (typeof user.name !== 'string' || user.name.trim() === '') {
+    return false;
+  }
+  if (typeof user.created_at !== 'string' || user.created_at.trim() === '') {
+    return false;
+  }
+
+  // Validate email format (basic check)
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailRegex.test(user.email)) {
+    return false;
+  }
+
+  // Validate UUID format for id (basic check)
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (!uuidRegex.test(user.id)) {
+    return false;
+  }
+
+  // Validate created_at is a valid date string
+  const date = new Date(user.created_at);
+  if (isNaN(date.getTime())) {
+    return false;
+  }
+
+  return true;
+}
+
+// Session expiration time in milliseconds (7 days)
+const SESSION_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * Check if a session has expired based on issued_at timestamp
+ */
+function isSessionExpired(issuedAt: string): boolean {
+  const issuedDate = new Date(issuedAt);
+  if (isNaN(issuedDate.getTime())) {
+    // Invalid date, consider expired
+    return true;
+  }
+
+  const now = new Date();
+  const ageMs = now.getTime() - issuedDate.getTime();
+
+  return ageMs > SESSION_MAX_AGE_MS;
+}
+
+/**
  * Get the current session user
  */
 export async function getSessionUser(): Promise<User | null> {
@@ -183,9 +259,19 @@ export async function getSessionUser(): Promise<User | null> {
 
     // Decode user data from session cookie
     const decoded = Buffer.from(sessionCookie, 'base64').toString('utf-8');
-    const user: User = JSON.parse(decoded);
+    const parsed = JSON.parse(decoded);
 
-    return user;
+    // Validate the parsed object has all required fields
+    if (!isValidUser(parsed)) {
+      return null;
+    }
+
+    // Check session expiration if issued_at is present
+    if (parsed.issued_at && isSessionExpired(parsed.issued_at)) {
+      return null;
+    }
+
+    return parsed;
   } catch {
     return null;
   }
@@ -197,4 +283,53 @@ export async function getSessionUser(): Promise<User | null> {
 export async function clearSession(): Promise<void> {
   const cookieStore = await cookies();
   cookieStore.delete(SESSION_COOKIE);
+}
+
+/**
+ * Update a user's profile
+ * This updates both the in-memory store (if available) and the session
+ */
+export async function updateUserProfile(
+  currentUser: User,
+  updates: { name?: string }
+): Promise<{ user: User }> {
+  // Create updated user object
+  const updatedUser: User = {
+    ...currentUser,
+    name: updates.name !== undefined ? updates.name : currentUser.name,
+  };
+
+  // Try to update in-memory store if the user exists there
+  loadUsersFromFile();
+  const storedUser = users.get(currentUser.id);
+  if (storedUser) {
+    if (updates.name !== undefined) {
+      storedUser.name = updates.name;
+    }
+    users.set(currentUser.id, storedUser);
+    saveUsersToFile();
+  }
+
+  // Update session with new user data
+  await createSession(updatedUser);
+
+  return { user: updatedUser };
+}
+
+/**
+ * Delete a user account
+ * Removes the user from the in-memory store and clears the session
+ * Returns true if user was deleted, false if not found
+ */
+export async function deleteUser(userId: string): Promise<boolean> {
+  // Check if user exists in memory
+  const exists = users.has(userId);
+
+  // Delete from in-memory store
+  users.delete(userId);
+
+  // Clear the session
+  await clearSession();
+
+  return exists;
 }

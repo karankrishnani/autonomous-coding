@@ -1,8 +1,14 @@
 'use client';
 
 import Link from 'next/link';
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
+
+interface FieldErrors {
+  name?: string;
+  email?: string;
+  password?: string;
+}
 
 export default function SignupPage() {
   const router = useRouter();
@@ -10,19 +16,75 @@ export default function SignupPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
+  const [touchedFields, setTouchedFields] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
+
+  // Ref for tracking in-flight requests (prevents double-submit)
+  const isSubmittingRef = useRef(false);
+
+  // Email validation regex
+  const isValidEmail = (email: string) => {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  };
+
+  // Validate a single field
+  const validateField = (field: string, value: string): string | undefined => {
+    switch (field) {
+      case 'name':
+        if (!value.trim()) return 'Name is required';
+        if (value.trim().length < 2) return 'Name must be at least 2 characters';
+        return undefined;
+      case 'email':
+        if (!value.trim()) return 'Email is required';
+        if (!isValidEmail(value)) return 'Please enter a valid email address';
+        return undefined;
+      case 'password':
+        if (!value) return 'Password is required';
+        if (value.length < 8) return 'Password must be at least 8 characters';
+        return undefined;
+      default:
+        return undefined;
+    }
+  };
+
+  // Handle field blur for real-time validation
+  const handleFieldBlur = (field: string, value: string) => {
+    setTouchedFields(prev => new Set(prev).add(field));
+    const error = validateField(field, value);
+    setFieldErrors(prev => ({ ...prev, [field]: error }));
+  };
+
+  // Validate all fields
+  const validateAllFields = (): boolean => {
+    const errors: FieldErrors = {
+      name: validateField('name', name),
+      email: validateField('email', email),
+      password: validateField('password', password),
+    };
+    setFieldErrors(errors);
+    setTouchedFields(new Set(['name', 'email', 'password']));
+    return !errors.name && !errors.email && !errors.password;
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError('');
-    setLoading(true);
 
-    // Basic validation
-    if (password.length < 8) {
-      setError('Password must be at least 8 characters');
-      setLoading(false);
+    // Prevent double-submit using ref (synchronous check)
+    if (isSubmittingRef.current) {
       return;
     }
+
+    setError('');
+
+    // Validate all fields first
+    if (!validateAllFields()) {
+      return;
+    }
+
+    // Set ref immediately (synchronous) to prevent double-click
+    isSubmittingRef.current = true;
+    setLoading(true);
 
     try {
       const res = await fetch('/api/auth/signup', {
@@ -43,6 +105,7 @@ export default function SignupPage() {
     } catch {
       setError('Something went wrong. Please try again.');
     } finally {
+      isSubmittingRef.current = false;
       setLoading(false);
     }
   };
@@ -81,12 +144,25 @@ export default function SignupPage() {
                 id="name"
                 type="text"
                 value={name}
-                onChange={(e) => setName(e.target.value)}
+                onChange={(e) => {
+                  setName(e.target.value);
+                  if (touchedFields.has('name')) {
+                    setFieldErrors(prev => ({ ...prev, name: validateField('name', e.target.value) }));
+                  }
+                }}
+                onBlur={(e) => handleFieldBlur('name', e.target.value)}
                 placeholder="Enter your full name"
-                className="input-field"
-                required
+                className={`input-field ${touchedFields.has('name') && fieldErrors.name ? 'border-red-500 focus:border-red-500 focus:ring-red-500' : ''}`}
                 autoComplete="name"
               />
+              {touchedFields.has('name') && fieldErrors.name && (
+                <p className="mt-1 text-sm text-red-600 flex items-center gap-1">
+                  <svg className="w-4 h-4 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
+                    <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                  </svg>
+                  {fieldErrors.name}
+                </p>
+              )}
             </div>
 
             {/* Email Field */}
@@ -98,12 +174,25 @@ export default function SignupPage() {
                 id="email"
                 type="email"
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                onChange={(e) => {
+                  setEmail(e.target.value);
+                  if (touchedFields.has('email')) {
+                    setFieldErrors(prev => ({ ...prev, email: validateField('email', e.target.value) }));
+                  }
+                }}
+                onBlur={(e) => handleFieldBlur('email', e.target.value)}
                 placeholder="Enter your email"
-                className="input-field"
-                required
+                className={`input-field ${touchedFields.has('email') && fieldErrors.email ? 'border-red-500 focus:border-red-500 focus:ring-red-500' : ''}`}
                 autoComplete="email"
               />
+              {touchedFields.has('email') && fieldErrors.email && (
+                <p className="mt-1 text-sm text-red-600 flex items-center gap-1">
+                  <svg className="w-4 h-4 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
+                    <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                  </svg>
+                  {fieldErrors.email}
+                </p>
+              )}
             </div>
 
             {/* Password Field */}
@@ -115,19 +204,34 @@ export default function SignupPage() {
                 id="password"
                 type="password"
                 value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                onChange={(e) => {
+                  setPassword(e.target.value);
+                  if (touchedFields.has('password')) {
+                    setFieldErrors(prev => ({ ...prev, password: validateField('password', e.target.value) }));
+                  }
+                }}
+                onBlur={(e) => handleFieldBlur('password', e.target.value)}
                 placeholder="Create a password (min 8 characters)"
-                className="input-field"
-                required
+                className={`input-field ${touchedFields.has('password') && fieldErrors.password ? 'border-red-500 focus:border-red-500 focus:ring-red-500' : ''}`}
                 autoComplete="new-password"
-                minLength={8}
               />
+              {touchedFields.has('password') && fieldErrors.password && (
+                <p className="mt-1 text-sm text-red-600 flex items-center gap-1">
+                  <svg className="w-4 h-4 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
+                    <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                  </svg>
+                  {fieldErrors.password}
+                </p>
+              )}
             </div>
 
             {/* Error Message */}
             {error && (
-              <div className="bg-red-50 text-red-700 px-4 py-3 rounded-lg text-sm">
-                {error}
+              <div className="bg-red-50 text-red-700 px-4 py-3 rounded-lg text-sm flex items-center gap-2" role="alert">
+                <svg className="w-5 h-5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
+                  <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                </svg>
+                <span>{error}</span>
               </div>
             )}
 

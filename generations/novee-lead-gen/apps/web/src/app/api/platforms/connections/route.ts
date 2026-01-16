@@ -1,0 +1,120 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { getSessionUser } from '@/lib/auth';
+import {
+  getConnectionsForUser,
+  getConnectionByPlatform,
+  createConnection,
+  deleteConnection,
+  PlatformType,
+  PlatformConnectionStatus,
+} from '@/lib/platforms';
+
+/**
+ * GET /api/platforms/connections
+ * Get all platform connections for the current user
+ */
+export async function GET() {
+  try {
+    const user = await getSessionUser();
+    if (!user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const connections = await getConnectionsForUser(user.id);
+    return NextResponse.json({ connections });
+  } catch (error) {
+    console.error('Error fetching platform connections:', error);
+    return NextResponse.json(
+      { error: 'Something went wrong. Please try again later.' },
+      { status: 500 }
+    );
+  }
+}
+
+/**
+ * POST /api/platforms/connections
+ * Create a new platform connection
+ */
+export async function POST(request: NextRequest) {
+  try {
+    const user = await getSessionUser();
+    if (!user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const body = await request.json();
+    const { platform, status } = body;
+
+    // Validate platform
+    if (!platform || !['SLACK', 'LINKEDIN'].includes(platform)) {
+      return NextResponse.json(
+        { error: 'Invalid platform. Must be SLACK or LINKEDIN.' },
+        { status: 400 }
+      );
+    }
+
+    // Check if connection already exists
+    const existing = await getConnectionByPlatform(user.id, platform as PlatformType);
+    if (existing) {
+      return NextResponse.json(
+        { error: 'Platform connection already exists.' },
+        { status: 409 }
+      );
+    }
+
+    // Create connection
+    const connection = await createConnection(
+      user.id,
+      platform as PlatformType,
+      (status as PlatformConnectionStatus) || 'PENDING'
+    );
+
+    return NextResponse.json({ connection }, { status: 201 });
+  } catch (error) {
+    console.error('Error creating platform connection:', error);
+    return NextResponse.json(
+      { error: 'Something went wrong. Please try again later.' },
+      { status: 500 }
+    );
+  }
+}
+
+/**
+ * DELETE /api/platforms/connections
+ * Disconnect a platform connection
+ * Body: { connectionId: string }
+ */
+export async function DELETE(request: NextRequest) {
+  try {
+    const user = await getSessionUser();
+    if (!user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const body = await request.json();
+    const { connectionId } = body;
+
+    if (!connectionId) {
+      return NextResponse.json(
+        { error: 'Connection ID is required.' },
+        { status: 400 }
+      );
+    }
+
+    const deleted = await deleteConnection(user.id, connectionId);
+    if (!deleted) {
+      return NextResponse.json(
+        { error: 'Connection not found or already deleted.' },
+        { status: 404 }
+      );
+    }
+
+    return NextResponse.json({ success: true, message: 'Platform disconnected successfully.' });
+  } catch (error) {
+    console.error('Error disconnecting platform:', error);
+    return NextResponse.json(
+      { error: 'Something went wrong. Please try again later.' },
+      { status: 500 }
+    );
+  }
+}

@@ -1,8 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionUser } from '@/lib/auth';
+import {
+  getKeywordGroupsByUserId,
+  createKeywordGroup,
+  getAllKeywordsForUser,
+  clearAllKeywordsForUser,
+  deleteKeywordForUser
+} from '@/lib/keywords';
+import { trackOnboardingEvent, hasCompletedEvent } from '@/lib/onboarding';
 
 /**
  * GET /api/keywords - List keywords for the authenticated user
+ * RLS: Only returns keyword groups belonging to the authenticated user
  */
 export async function GET() {
   try {
@@ -16,10 +25,13 @@ export async function GET() {
       );
     }
 
-    // For now, return empty keywords
-    // In production, this would fetch from Supabase
+    // Get keyword groups scoped to this user (RLS)
+    const keywordGroups = getKeywordGroupsByUserId(user.id);
+    const allKeywords = getAllKeywordsForUser(user.id);
+
     return NextResponse.json({
-      keyword_groups: [],
+      keyword_groups: keywordGroups,
+      all_keywords: allKeywords,
     });
   } catch (error) {
     console.error('Keywords API error:', error);
@@ -32,6 +44,7 @@ export async function GET() {
 
 /**
  * POST /api/keywords - Create a new keyword group
+ * RLS: Creates keyword group owned by the authenticated user
  */
 export async function POST(request: NextRequest) {
   try {
@@ -65,16 +78,87 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // For now, return success
-    // In production, this would save to Supabase
+    // Create keyword group owned by this user (RLS)
+    const keywordGroup = createKeywordGroup(user.id, keywords);
+
+    // Track KEYWORDS_SELECTED onboarding event (first time only)
+    try {
+      const alreadySelectedKeywords = await hasCompletedEvent(user.id, 'KEYWORDS_SELECTED');
+      if (!alreadySelectedKeywords) {
+        await trackOnboardingEvent(user.id, 'KEYWORDS_SELECTED', {
+          keywordCount: keywords.length,
+          keywords: keywords.slice(0, 10), // Store first 10 keywords for reference
+        });
+      }
+    } catch (trackError) {
+      // Log but don't fail keyword creation if tracking fails
+      console.error('Failed to track onboarding event:', trackError);
+    }
+
     return NextResponse.json({
       message: 'Keywords created successfully',
-      keyword_group: {
-        id: 'mock-id',
-        keywords,
-        active: true,
-        created_at: new Date().toISOString(),
-      },
+      keyword_group: keywordGroup,
+    }, { status: 201 });
+  } catch (error) {
+    console.error('Keywords API error:', error);
+    return NextResponse.json(
+      { error: 'Internal server error' },
+      { status: 500 }
+    );
+  }
+}
+
+/**
+ * DELETE /api/keywords - Clear all keywords or delete a specific keyword
+ * RLS: Only deletes keyword groups belonging to the authenticated user
+ *
+ * Body params (optional):
+ * - keyword: string - If provided, only deletes this specific keyword
+ * - If no body, clears all keywords
+ */
+export async function DELETE(request: NextRequest) {
+  try {
+    // Check authentication
+    const user = await getSessionUser();
+
+    if (!user) {
+      return NextResponse.json(
+        { error: 'Authentication required' },
+        { status: 401 }
+      );
+    }
+
+    // Check if there's a body with a specific keyword to delete
+    let body: { keyword?: string } = {};
+    try {
+      body = await request.json();
+    } catch {
+      // No body or invalid JSON - proceed with clear all
+    }
+
+    if (body.keyword) {
+      // Delete a specific keyword
+      const deleted = deleteKeywordForUser(user.id, body.keyword);
+
+      if (!deleted) {
+        return NextResponse.json(
+          { error: 'Keyword not found' },
+          { status: 404 }
+        );
+      }
+
+      return NextResponse.json({
+        message: 'Keyword deleted successfully',
+        keyword: body.keyword,
+      });
+    }
+
+    // Clear all keywords for this user (RLS)
+    const deletedCount = clearAllKeywordsForUser(user.id);
+
+    return NextResponse.json({
+      message: 'All keywords cleared successfully',
+      deleted_count: deletedCount,
     });
   } catch (error) {
     console.error('Keywords API error:', error);

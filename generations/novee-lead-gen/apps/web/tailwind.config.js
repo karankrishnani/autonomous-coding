@@ -4,6 +4,15 @@ module.exports = {
     './src/pages/**/*.{js,ts,jsx,tsx,mdx}',
     './src/components/**/*.{js,ts,jsx,tsx,mdx}',
     './src/app/**/*.{js,ts,jsx,tsx,mdx}',
+    './src/lib/**/*.{js,ts,jsx,tsx}',
+  ],
+  safelist: [
+    // Platform connection status colors
+    'bg-green-500',   // Connected
+    'bg-yellow-500',  // Pending
+    'bg-amber-500',   // Degraded
+    'bg-red-500',     // Disconnected
+    'bg-gray-400',    // Unknown/Coming Soon
   ],
   darkMode: 'class',
   theme: {
@@ -34,7 +43,7 @@ module.exports = {
         text: {
           primary: '#111827',
           secondary: '#6B7280',
-          muted: '#9CA3AF',
+          muted: '#6B7280', // Changed from #9CA3AF for WCAG AA compliance (4.5:1 contrast)
         },
       },
       fontFamily: {

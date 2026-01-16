@@ -1,19 +1,32 @@
 'use client';
 
 import Link from 'next/link';
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, useRef } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 
 export default function LoginPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
+  // Ref for tracking in-flight requests (prevents double-submit)
+  const isSubmittingRef = useRef(false);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    // Prevent double-submit using ref (synchronous check)
+    if (isSubmittingRef.current) {
+      return;
+    }
+
     setError('');
+
+    // Set ref immediately (synchronous) to prevent double-click
+    isSubmittingRef.current = true;
     setLoading(true);
 
     try {
@@ -30,11 +43,13 @@ export default function LoginPage() {
         return;
       }
 
-      // Redirect to dashboard on success
-      router.push('/dashboard');
+      // Redirect to the originally requested page or dashboard
+      const redirectTo = searchParams.get('redirect') || '/dashboard';
+      router.push(redirectTo);
     } catch {
       setError('Something went wrong. Please try again.');
     } finally {
+      isSubmittingRef.current = false;
       setLoading(false);
     }
   };
@@ -110,8 +125,11 @@ export default function LoginPage() {
 
             {/* Error Message */}
             {error && (
-              <div className="bg-red-50 text-red-700 px-4 py-3 rounded-lg text-sm">
-                {error}
+              <div className="bg-red-50 text-red-700 px-4 py-3 rounded-lg text-sm flex items-center gap-2" role="alert">
+                <svg className="w-5 h-5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
+                  <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                </svg>
+                <span>{error}</span>
               </div>
             )}
 

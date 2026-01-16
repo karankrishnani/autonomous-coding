@@ -14,7 +14,7 @@
     --color-surface: #F8FAFC;
     --color-text-primary: #111827;
     --color-text-secondary: #6B7280;
-    --color-text-muted: #9CA3AF;
+    --color-text-muted: #6B7280;
     --color-border: #E5E7EB;
     --color-border-focus: #2563EB;
   }
@@ -27,7 +27,7 @@
     --color-surface: #1F2937;
     --color-text-primary: #F9FAFB;
     --color-text-secondary: #D1D5DB;
-    --color-text-muted: #9CA3AF;
+    --color-text-muted: #6B7280;
     --color-border: #374151;
     --color-border-focus: #60A5FA;
   }
@@ -35,6 +35,12 @@
   body {
     @apply bg-white text-text-primary antialiased;
     font-family: 'Inter', system-ui, sans-serif;
+  }
+
+  /* Accessible focus styles for interactive elements */
+  a:focus-visible,
+  button:focus-visible {
+    @apply outline-none ring-2 ring-primary ring-offset-2;
   }
 
   .dark body {
@@ -48,6 +54,7 @@
   .btn-primary {
     @apply bg-primary text-white px-6 py-3 rounded-full font-medium
            hover:bg-primary-dark transition-colors duration-150
+           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2
            disabled:opacity-50 disabled:cursor-not-allowed;
   }
 
@@ -55,6 +62,7 @@
   .btn-secondary {
     @apply bg-primary-dark text-white px-6 py-3 rounded-full font-medium
            hover:bg-blue-900 transition-colors duration-150
+           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-dark focus-visible:ring-offset-2
            disabled:opacity-50 disabled:cursor-not-allowed;
   }
 
@@ -62,13 +70,15 @@
   .btn-tertiary {
     @apply bg-transparent border border-gray-300 text-gray-700 px-6 py-3 rounded-full font-medium
            hover:bg-gray-50 transition-colors duration-150
+           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 focus-visible:ring-offset-2
            disabled:opacity-50 disabled:cursor-not-allowed;
   }
 
   /* Google OAuth button */
   .btn-google {
     @apply bg-gray-100 text-gray-700 px-6 py-3 rounded-full font-medium
-           hover:bg-gray-200 transition-colors duration-150 flex items-center justify-center gap-2;
+           hover:bg-gray-200 transition-colors duration-150 flex items-center justify-center gap-2
+           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 focus-visible:ring-offset-2;
   }
 
   /* Input field */

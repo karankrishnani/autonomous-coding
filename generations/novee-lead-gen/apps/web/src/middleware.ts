@@ -52,7 +52,11 @@ export function middleware(request: NextRequest) {
   // Redirect unauthenticated users from protected routes to login
   if (isProtectedRoute && !isAuthenticated) {
     const loginUrl = new URL('/login', request.url);
-    loginUrl.searchParams.set('redirect', pathname);
+    // Preserve the full path including query string
+    const fullPath = request.nextUrl.search
+      ? `${pathname}${request.nextUrl.search}`
+      : pathname;
+    loginUrl.searchParams.set('redirect', fullPath);
     return NextResponse.redirect(loginUrl);
   }
 
