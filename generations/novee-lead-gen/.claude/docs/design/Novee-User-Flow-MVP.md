@@ -29,7 +29,7 @@
 - Post-login: Redirect to Keyword Selections (if you have platform connections but no keyword selections)
 
 ### Screen: Login
-![Novee login screen with email, password, Google OAuth, and CTA to sign up.](./assets/user-flow/01-login.png)
+![Novee login screen with email, password, Google OAuth, and CTA to sign up.](./mockups/01-login.png)
 
 **Drop-offs:**
 - Friction re-entering credentials if they just signed up
@@ -40,7 +40,7 @@
 - Keep CTA button prominent and emphasize Google sign-in parity
 
 ### Screen: Login (Alt CTA Layout)
-![Login layout variant showing elevated Google sign-in button option.](./assets/user-flow/01-login-alt.png)
+![Login layout variant showing elevated Google sign-in button option.](./mockups/01-login-alt.png)
 
 **Design Notes:**
 - Variant places Google CTA beneath primary login for A/B testing or future experiments
@@ -63,7 +63,7 @@
 - App shows real-time logs like: “Monitoring Slack channels…”
 
 ### Screen: Desktop App Download (Support Emphasis)
-![Desktop download page highlighting privacy, platform integration, install guide tabs, and support scheduling.](./assets/user-flow/02-desktop-download-support.png)
+![Desktop download page highlighting privacy, platform integration, install guide tabs, and support scheduling.](./mockups/02-desktop-download-support.png)
 
 **Key Details:**
 - Split hero with benefits list, download CTA, and onboarding progress indicator
@@ -71,14 +71,14 @@
 - FAQ accordion reinforces privacy and integration messaging
 
 ### Screen: Desktop App Download (Video Walkthrough)
-![Desktop download page with embedded video walkthrough and alternative help tabs.](./assets/user-flow/02-desktop-download-video.png)
+![Desktop download page with embedded video walkthrough and alternative help tabs.](./mockups/02-desktop-download-video.png)
 
 **Key Details:**
 - Video walkthrough tab is primary to reduce install friction
 - Maintain consistent FAQ anchors underneath
 
 ### Screen: Desktop App Download (Step-by-Step Instructions)
-![Desktop download page showing numbered installation instructions and FAQ.](./assets/user-flow/02-desktop-download-instructions.png)
+![Desktop download page showing numbered installation instructions and FAQ.](./mockups/02-desktop-download-instructions.png)
 
 **Key Details:**
 - Clear numbered steps for Windows/Mac to complement video support
@@ -102,7 +102,7 @@
   - “To connect platforms, please log into them from the Desktop App. This protects your privacy and bypasses platform restrictions.”
 
 ### Screen: Platform Connections Overview (WebApp)
-![Onboarding step showing active and upcoming platform connections with download reminder illustration.](./assets/user-flow/02-platform-connect.png)
+![Onboarding step showing active and upcoming platform connections with download reminder illustration.](./mockups/02-platform-connect.png)
 
 **Key Details:**
 - Progress indicator across onboarding steps keeps users oriented
@@ -126,7 +126,7 @@
   - Add note: “If you’re already signed in on the web, this connects your session.”
 
 ### Screen: Desktop Login
-![Onboarding step showing desktop app open on login screen.](./assets/user-flow/02-desktop-app-login.png)
+![Onboarding step showing desktop app open on login screen.](./mockups/02-desktop-app-login.png)
 
 ---
 
@@ -156,7 +156,7 @@
   - Or collapse into a + Add Platform button that first shows Slack.
 
 ### Screen: Connect Social Platforms (Desktop App)
-![Desktop app view listing Slack and LinkedIn connection statuses with CTA buttons and link to keyword setup.](./assets/user-flow/03b-desktop-connect-platforms.png)
+![Desktop app view listing Slack and LinkedIn connection statuses with CTA buttons and link to keyword setup.](./mockups/03b-desktop-connect-platforms.png)
 
 **Key Details:**
 - Emphasizes privacy: “Novee only reads content to find leads”
@@ -196,14 +196,14 @@
 - Tooltip or helper text: “Keywords work best when they match how clients talk: roles, skills, or tools.”
 
 ### Screen: Keyword Setup (Empty State)
-![Keyword onboarding screen with empty selected lists and dropdown selectors.](./assets/user-flow/04-keywords-empty.png)
+![Keyword onboarding screen with empty selected lists and dropdown selectors.](./mockups/04-keywords-empty.png)
 
 **Key Details:**
 - Progress bar shows step 3/3 to encourage completion
 - Encourages manual keyword entry plus suggestions by discipline, skills, and tools
 
 ### Screen: Keyword Setup (Populated)
-![Keyword onboarding screen with selected skills, tools, and additional keywords.](./assets/user-flow/04-keywords-filled.png)
+![Keyword onboarding screen with selected skills, tools, and additional keywords.](./mockups/04-keywords-filled.png)
 
 **Key Details:**
 - Pills show active selections and counts for transparency
@@ -252,7 +252,7 @@ Add:
 - Consider showing 1–2 highlighted leads with label: “🔥 Hot Now”
 
 ### Screen: Lead Feed
-![Lead feed web dashboard showing filters, lead cards sourced from Slack and LinkedIn, and footer.](./assets/user-flow/05-lead-feed.png)
+![Lead feed web dashboard showing filters, lead cards sourced from Slack and LinkedIn, and footer.](./mockups/05-lead-feed.png)
 
 **Key Details:**
 - Tabbed filters for New, Viewed, Closed, and Marked for Later
