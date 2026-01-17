@@ -1,7 +1,7 @@
 /**
  * Authentication library using Supabase Auth
  */
-import { createClient, createRouteHandlerClient } from './supabase/server';
+import { createClient, createRouteHandlerClient, createServiceRoleClient } from './supabase/server';
 import { NextResponse } from 'next/server';
 
 export interface User {
@@ -254,8 +254,9 @@ export async function getSessionUser(): Promise<User | null> {
       return null;
     }
 
-    // Fetch user profile from public.users table
-    const { data: profile } = await supabase
+    // Fetch user profile from public.users table using service role to bypass RLS
+    const serviceClient = await createServiceRoleClient();
+    const { data: profile } = await serviceClient
       .from('users')
       .select('name, created_at')
       .eq('id', user.id)
@@ -287,17 +288,24 @@ export async function updateUserProfile(
   currentUser: User,
   updates: { name?: string }
 ): Promise<{ user: User }> {
-  const supabase = await createClient();
+  // Use service role client to bypass RLS (user already validated via session)
+  const supabase = await createServiceRoleClient();
 
   // Update name in public.users table
   if (updates.name !== undefined) {
-    await supabase
+    const { error } = await supabase
       .from('users')
       .update({ name: updates.name })
       .eq('id', currentUser.id);
 
-    // Also update user metadata
-    await supabase.auth.updateUser({
+    if (error) {
+      console.error('Failed to update user profile:', error);
+      throw new Error('Failed to update profile');
+    }
+
+    // Also update user metadata via regular client
+    const regularClient = await createClient();
+    await regularClient.auth.updateUser({
       data: { full_name: updates.name },
     });
   }

@@ -11,14 +11,18 @@
 import { app, BrowserWindow, ipcMain, safeStorage } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
+import * as os from 'os';
 import { chromium, BrowserContext, Page, Route } from 'playwright';
 import { ScraperScheduler, ScraperSchedulerState } from './scraper';
 
 // Keep a global reference of the window object
 let mainWindow: BrowserWindow | null = null;
 
-// Playwright browser context (persistent across sessions)
-let playwrightContext: BrowserContext | null = null;
+// Playwright browser contexts
+// Login context: visible browser for user authentication
+let loginContext: BrowserContext | null = null;
+// Scrape context: headless browser for background scraping
+let scrapeContext: BrowserContext | null = null;
 
 // Captured Slack workspaces (in-memory cache, fetched from API)
 let slackWorkspaces: WorkspaceInfo[] = [];
@@ -135,6 +139,7 @@ interface PlatformConnection {
     workspaces?: WorkspaceInfo[];
   };
   connected_at?: string;
+  last_checked_at?: string;
 }
 
 interface ConnectionsResponse extends ApiErrorResponse {
@@ -309,11 +314,19 @@ async function setupSSBRedirectInterception(context: BrowserContext): Promise<vo
 }
 
 /**
- * Get or create a persistent Playwright browser context
+ * Get or create a visible Playwright browser context for login
+ * This context shows a visible browser window so users can enter credentials
  */
-async function getPlaywrightContext(): Promise<BrowserContext> {
-  if (playwrightContext) {
-    return playwrightContext;
+async function getLoginContext(): Promise<BrowserContext> {
+  // Close scrape context if open (only one persistent context can use the directory)
+  if (scrapeContext) {
+    console.log('[Playwright] Closing scrape context to open login context...');
+    await scrapeContext.close().catch(() => {});
+    scrapeContext = null;
+  }
+
+  if (loginContext) {
+    return loginContext;
   }
 
   // Ensure cache directory exists
@@ -321,19 +334,66 @@ async function getPlaywrightContext(): Promise<BrowserContext> {
     fs.mkdirSync(PLAYWRIGHT_CACHE_DIR, { recursive: true });
   }
 
-  console.log('[Playwright] Launching persistent browser context...');
+  console.log('[Playwright] Launching visible browser context for login...');
 
-  // Launch persistent context with visible browser
-  playwrightContext = await chromium.launchPersistentContext(PLAYWRIGHT_CACHE_DIR, {
+  // Launch persistent context with visible browser for login
+  loginContext = await chromium.launchPersistentContext(PLAYWRIGHT_CACHE_DIR, {
     headless: false,
     viewport: { width: 1280, height: 800 },
   });
 
   // Set up SSB redirect interception
-  await setupSSBRedirectInterception(playwrightContext);
+  await setupSSBRedirectInterception(loginContext);
 
-  console.log('[Playwright] Browser context created');
-  return playwrightContext;
+  console.log('[Playwright] Login context created');
+  return loginContext;
+}
+
+/**
+ * Get or create a headless Playwright browser context for scraping
+ * This context runs in the background without showing a window
+ */
+async function getScrapeContext(): Promise<BrowserContext> {
+  // Close login context if open (only one persistent context can use the directory)
+  if (loginContext) {
+    console.log('[Playwright] Closing login context to open scrape context...');
+    await loginContext.close().catch(() => {});
+    loginContext = null;
+  }
+
+  if (scrapeContext) {
+    return scrapeContext;
+  }
+
+  // Ensure cache directory exists
+  if (!fs.existsSync(PLAYWRIGHT_CACHE_DIR)) {
+    fs.mkdirSync(PLAYWRIGHT_CACHE_DIR, { recursive: true });
+  }
+
+  console.log('[Playwright] Launching headless browser context for scraping...');
+
+  // Launch persistent context in headless mode for scraping
+  scrapeContext = await chromium.launchPersistentContext(PLAYWRIGHT_CACHE_DIR, {
+    headless: true,
+    viewport: { width: 1280, height: 800 },
+  });
+
+  // Set up SSB redirect interception
+  await setupSSBRedirectInterception(scrapeContext);
+
+  console.log('[Playwright] Scrape context created');
+  return scrapeContext;
+}
+
+/**
+ * Close the login context after login is complete
+ */
+async function closeLoginContext(): Promise<void> {
+  if (loginContext) {
+    console.log('[Playwright] Closing login context...');
+    await loginContext.close().catch(() => {});
+    loginContext = null;
+  }
 }
 
 /**
@@ -374,7 +434,7 @@ function createWindow() {
 }
 
 // Create window when app is ready
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   createWindow();
 
   // Start scheduler if user is already logged in
@@ -382,20 +442,31 @@ app.whenReady().then(() => {
   if (session) {
     console.log('[Startup] Valid session found, starting scheduler...');
     startScraperScheduler();
+
+    // Register/update desktop session on startup
+    const sessionResult = await registerDesktopSession(session.token);
+    if (!sessionResult.success) {
+      console.warn('[Startup] Desktop session registration failed (non-blocking):', sessionResult.error);
+    }
   } else {
     console.log('[Startup] No session found, scheduler will start after login');
   }
 });
 
-// Clean up Playwright context and scheduler when app quits
+// Clean up Playwright contexts and scheduler when app quits
 app.on('before-quit', async () => {
   // Stop the scraper scheduler
   stopScraperScheduler();
 
-  if (playwrightContext) {
-    console.log('[Playwright] Closing browser context...');
-    await playwrightContext.close().catch(() => {});
-    playwrightContext = null;
+  if (loginContext) {
+    console.log('[Playwright] Closing login context...');
+    await loginContext.close().catch(() => {});
+    loginContext = null;
+  }
+  if (scrapeContext) {
+    console.log('[Playwright] Closing scrape context...');
+    await scrapeContext.close().catch(() => {});
+    scrapeContext = null;
   }
 });
 
@@ -435,7 +506,8 @@ ipcMain.handle('open-slack-login', async () => {
   }
 
   try {
-    const context = await getPlaywrightContext();
+    // Use visible login context for user authentication
+    const context = await getLoginContext();
     const page = await context.newPage();
 
     // Navigate to Slack signin
@@ -588,8 +660,11 @@ ipcMain.handle('open-slack-login', async () => {
 
     console.log(`[Slack] Capture complete. ${capturedWorkspaces.length} workspaces captured.`);
 
-    // Close the signin page (keep context for future searches)
+    // Close the signin page
     await page.close();
+
+    // Close the login context - scraping will use headless context
+    await closeLoginContext();
 
     return { success: true };
 
@@ -661,10 +736,12 @@ async function searchSlackWorkspace(
   lastScrapeDate?: number
 ): Promise<SearchResultItem[]> {
   const results: SearchResultItem[] = [];
+  let page: Page | null = null;
 
   try {
-    const context = await getPlaywrightContext();
-    const page = await context.newPage();
+    // Use headless scrape context for background scraping
+    const context = await getScrapeContext();
+    page = await context.newPage();
 
     console.log(`[Slack Search] Navigating to workspace: ${workspace.name}`);
     await page.goto(workspace.url, { waitUntil: 'domcontentloaded', timeout: 30000 });
@@ -738,7 +815,7 @@ async function searchSlackWorkspace(
       const emptyStateTitle = await emptyState.locator('.c-empty_state__title').textContent().catch(() => '');
       if (emptyStateTitle && emptyStateTitle.includes('Nothing turned up')) {
         console.log(`[Slack Search] No results found for keyword "${keyword}"`);
-        await page.close();
+        // Page will be closed in finally block
         return [];
       }
     }
@@ -808,8 +885,29 @@ async function searchSlackWorkspace(
         const timestampElement = resultItem.locator('span[data-qa="timestamp_label"]').first();
         const timestamp = await timestampElement.textContent().catch(() => '') || '';
 
-        // Extract permalink
-        const permalink = await permalinkElement.getAttribute('href').catch(() => '') || '';
+        // Extract permalink - try multiple approaches
+        let permalink = '';
+
+        // First try: get href from the timestamp link element
+        permalink = await permalinkElement.getAttribute('href').catch(() => '') || '';
+
+        // Second try: if empty, look for any link with a Slack message URL pattern
+        if (!permalink) {
+          const archiveLink = resultItem.locator('a[href*="/archives/"]').first();
+          permalink = await archiveLink.getAttribute('href').catch(() => '') || '';
+        }
+
+        // Third try: check for data-href attribute
+        if (!permalink) {
+          permalink = await permalinkElement.getAttribute('data-href').catch(() => '') || '';
+        }
+
+        // Log if we still couldn't find a permalink
+        if (!permalink) {
+          console.warn(`[Slack Search] Could not extract permalink for result ${j + 1}`);
+        } else {
+          console.log(`[Slack Search] Extracted permalink: ${permalink}`);
+        }
 
         // Extract sender
         const senderElement = resultItem.locator('button[data-qa="message_sender_name"]').first();
@@ -824,15 +922,11 @@ async function searchSlackWorkspace(
           timestampUnix,
         });
 
-        console.log(`[Slack Search] Extracted result ${j + 1}: "${message.substring(0, 50)}..." from #${channel}`);
+        console.log(`[Slack Search] Extracted result ${j + 1}: "${message.substring(0, 50)}..." from #${channel}, permalink: ${permalink ? 'yes' : 'NO'}`);
       } catch (error) {
         console.warn(`[Slack Search] Error extracting result ${j + 1}:`, error);
       }
     }
-
-    // Close the page
-    await page.close();
-    await new Promise((resolve) => setTimeout(resolve, 1000));
 
     console.log(`[Slack Search] Workspace ${workspace.name} complete: ${results.length} results`);
     return results;
@@ -840,6 +934,16 @@ async function searchSlackWorkspace(
   } catch (error) {
     console.error(`[Slack Search] Error searching workspace ${workspace.name}:`, error);
     return results;
+  } finally {
+    // Always close the page to prevent lingering browser windows
+    if (page) {
+      try {
+        await page.close();
+        console.log('[Slack Search] Page closed');
+      } catch (closeError) {
+        console.warn('[Slack Search] Failed to close page:', closeError);
+      }
+    }
   }
 }
 
@@ -986,11 +1090,12 @@ async function scrapeWorkspace(
         id: string;
         platform: string;
         metadata?: { workspaces?: Array<{ url: string }> };
+        last_checked_at?: string;
       }>;
     };
 
     // Find the Slack connection that contains this workspace
-    const slackConnection = connectionsData.connections.find(
+    let slackConnection = connectionsData.connections.find(
       (conn) =>
         conn.platform === 'SLACK' &&
         conn.metadata?.workspaces?.some(
@@ -1000,16 +1105,24 @@ async function scrapeWorkspace(
 
     if (!slackConnection) {
       // Try to find any Slack connection
-      const anySlackConnection = connectionsData.connections.find(
+      slackConnection = connectionsData.connections.find(
         (conn) => conn.platform === 'SLACK'
       );
-      if (!anySlackConnection) {
+      if (!slackConnection) {
         throw new Error('No Slack connection found');
       }
-      // Use the first Slack connection
-      result.scrapeLogId = anySlackConnection.id;
+    }
+
+    result.scrapeLogId = slackConnection.id;
+
+    // Get last_checked_at for incremental scraping
+    const lastCheckedAt = slackConnection.last_checked_at;
+    const lastScrapeDate = lastCheckedAt ? new Date(lastCheckedAt).getTime() / 1000 : undefined;
+
+    if (lastScrapeDate) {
+      console.log(`[Scrape] Incremental scrape - ignoring messages before ${new Date(lastScrapeDate * 1000).toISOString()}`);
     } else {
-      result.scrapeLogId = slackConnection.id;
+      console.log('[Scrape] Full scrape - no previous last_checked_at found');
     }
 
     // Create scrape log
@@ -1037,12 +1150,12 @@ async function scrapeWorkspace(
       result.keywordsSearched.push(keyword);
 
       try {
-        // Use real Playwright search
-        const searchResults = await searchSlackWorkspace(workspace, keyword);
+        // Use real Playwright search with incremental scraping
+        const searchResults = await searchSlackWorkspace(workspace, keyword, lastScrapeDate);
         const messagesForKeyword = searchResults.length;
         result.messagesFound += messagesForKeyword;
 
-        console.log(`[Scrape] Found ${messagesForKeyword} messages for keyword "${keyword}"`);
+        console.log(`[Scrape] Found ${messagesForKeyword} new messages for keyword "${keyword}"`);
 
         // Create leads for each matching message
         for (const searchResult of searchResults) {
@@ -1113,10 +1226,45 @@ async function scrapeWorkspace(
       });
     }
 
+    // Update platform connection with successful scrape timestamp
+    try {
+      await fetch(`${WEB_APP_URL}/api/scraper/success`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Cookie: session.token,
+        },
+        body: JSON.stringify({
+          platform: 'SLACK',
+        }),
+      });
+      console.log('[Scrape] Updated platform connection last_checked_at');
+    } catch (updateError) {
+      console.warn('[Scrape] Failed to update platform connection:', updateError);
+    }
+
     return result;
   } catch (error) {
     result.error = error instanceof Error ? error.message : String(error);
     console.error(`[Scrape] Error scraping workspace ${workspace.name}:`, result.error);
+
+    // Update platform connection with error (updates last_error and last_checked_at)
+    try {
+      await fetch(`${WEB_APP_URL}/api/scraper/error`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Cookie: session.token,
+        },
+        body: JSON.stringify({
+          platform: 'SLACK',
+          error: result.error,
+        }),
+      });
+      console.log('[Scrape] Updated platform connection with error');
+    } catch (updateError) {
+      console.warn('[Scrape] Failed to update platform connection with error:', updateError);
+    }
 
     // Try to update scrape log with failure
     if (result.scrapeLogId) {
@@ -1385,6 +1533,129 @@ interface SessionResponse {
   };
 }
 
+/**
+ * Detect the operating system type
+ */
+function detectOsType(): 'Windows' | 'Mac' | 'Linux' {
+  switch (process.platform) {
+    case 'win32':
+      return 'Windows';
+    case 'darwin':
+      return 'Mac';
+    default:
+      return 'Linux';
+  }
+}
+
+/**
+ * Generate a unique device label for this desktop session
+ */
+function generateDeviceLabel(): string {
+  const osType = detectOsType();
+  const hostname = os.hostname() || 'Unknown';
+  return `${osType} - ${hostname}`;
+}
+
+/**
+ * Track an onboarding event via the web app API
+ */
+async function trackOnboardingEvent(
+  authToken: string,
+  event: string,
+  metadata: Record<string, unknown> = {}
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    console.log(`[Onboarding] Tracking event: ${event}`);
+
+    const response = await fetch(`${WEB_APP_URL}/api/onboarding/events`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Cookie': authToken,
+      },
+      body: JSON.stringify({
+        event,
+        metadata,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({})) as { error?: string };
+      console.error(`[Onboarding] Failed to track event ${event}:`, errorData.error || response.status);
+      return { success: false, error: errorData.error || 'Failed to track event' };
+    }
+
+    console.log(`[Onboarding] Event ${event} tracked successfully`);
+    return { success: true };
+  } catch (error) {
+    console.error(`[Onboarding] Error tracking event ${event}:`, error);
+    return { success: false, error: String(error) };
+  }
+}
+
+/**
+ * Check if DESKTOP_INSTALLED event has already been tracked for this user
+ */
+async function hasDesktopInstalledEvent(authToken: string): Promise<boolean> {
+  try {
+    const response = await fetch(`${WEB_APP_URL}/api/onboarding/events`, {
+      method: 'GET',
+      headers: {
+        'Cookie': authToken,
+      },
+    });
+
+    if (!response.ok) {
+      return false;
+    }
+
+    const data = await response.json() as { events?: Array<{ event: string }> };
+    const events = data.events || [];
+    return events.some((e) => e.event === 'DESKTOP_INSTALLED');
+  } catch (error) {
+    console.error('[Onboarding] Error checking DESKTOP_INSTALLED event:', error);
+    return false;
+  }
+}
+
+/**
+ * Register desktop session with the backend
+ * Creates a new session entry in desktop_app_sessions table
+ */
+async function registerDesktopSession(authToken: string): Promise<{ success: boolean; sessionId?: string; error?: string }> {
+  try {
+    const deviceLabel = generateDeviceLabel();
+    const osType = detectOsType();
+
+    console.log(`[Session] Registering desktop session: ${deviceLabel} (${osType})`);
+
+    const response = await fetch(`${WEB_APP_URL}/api/desktop/session`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Cookie': authToken,
+      },
+      body: JSON.stringify({
+        device_label: deviceLabel,
+        os_type: osType,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({})) as { error?: string };
+      console.error('[Session] Failed to register session:', errorData.error || response.status);
+      return { success: false, error: errorData.error || 'Failed to register session' };
+    }
+
+    const data = await response.json() as { session: { id: string } };
+    console.log('[Session] Desktop session registered successfully:', data.session.id);
+    return { success: true, sessionId: data.session.id };
+  } catch (error) {
+    console.error('[Session] Error registering desktop session:', error);
+    return { success: false, error: String(error) };
+  }
+}
+
 ipcMain.handle('login', async (_event, email: string, password: string) => {
   console.log('Attempting login for:', email);
 
@@ -1464,6 +1735,28 @@ ipcMain.handle('login', async (_event, email: string, password: string) => {
 
     console.log('Login successful for:', user.email);
 
+    // Register the desktop session in the database
+    const sessionResult = await registerDesktopSession(authCookie);
+    if (!sessionResult.success) {
+      console.warn('[Login] Desktop session registration failed (non-blocking):', sessionResult.error);
+      // Note: We don't fail login if session registration fails - it's a secondary concern
+    }
+
+    // Track DESKTOP_INSTALLED event on first login only
+    const alreadyInstalled = await hasDesktopInstalledEvent(authCookie);
+    if (!alreadyInstalled) {
+      const osType = detectOsType();
+      const deviceLabel = generateDeviceLabel();
+      await trackOnboardingEvent(authCookie, 'DESKTOP_INSTALLED', {
+        os_type: osType,
+        device_label: deviceLabel,
+        app_version: app.getVersion(),
+        timestamp: new Date().toISOString(),
+      });
+    } else {
+      console.log('[Login] DESKTOP_INSTALLED event already tracked, skipping');
+    }
+
     // Start the 24-hour scraper scheduler
     startScraperScheduler();
 
@@ -1538,6 +1831,57 @@ ipcMain.handle('check-session', async () => {
  */
 ipcMain.handle('get-web-app-url', async () => {
   return WEB_APP_URL;
+});
+
+/**
+ * Get platform connection info including last_checked_at
+ */
+ipcMain.handle('get-platform-connection-info', async (_event, platform: string) => {
+  const session = loadSession();
+  if (!session) {
+    return null;
+  }
+
+  try {
+    const response = await fetch(`${WEB_APP_URL}/api/platforms/connections`, {
+      method: 'GET',
+      headers: {
+        Cookie: session.token,
+      },
+    });
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const data = (await response.json()) as {
+      connections: Array<{
+        id: string;
+        platform: string;
+        status: string;
+        metadata?: { workspaces?: Array<{ url: string }> };
+        last_checked_at?: string;
+      }>;
+    };
+
+    const connection = data.connections.find(
+      (c) => c.platform === platform.toUpperCase()
+    );
+
+    if (!connection) {
+      return null;
+    }
+
+    return {
+      platform: connection.platform,
+      status: connection.status,
+      workspaceCount: connection.metadata?.workspaces?.length || 0,
+      lastCheckedAt: connection.last_checked_at || null,
+    };
+  } catch (error) {
+    console.error('Failed to get platform connection info:', error);
+    return null;
+  }
 });
 
 /**

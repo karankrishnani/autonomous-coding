@@ -75,6 +75,16 @@ interface ManualScrapeResult {
 }
 
 /**
+ * Platform connection info
+ */
+interface PlatformConnectionInfo {
+  platform: string;
+  status: string;
+  workspaceCount: number;
+  lastCheckedAt: string | null;
+}
+
+/**
  * API exposed to the renderer process
  */
 interface ElectronAPI {
@@ -89,6 +99,9 @@ interface ElectronAPI {
   getSlackWorkspaces: () => Promise<WorkspaceInfo[]>;
   searchSlackKeywords: (keywords: string, lastScrapeDate?: number) => Promise<SearchResult[]>;
   openSlackMessage: (url: string) => Promise<{ success: boolean }>;
+
+  // Platform connection operations
+  getPlatformConnectionInfo: (platform: string) => Promise<PlatformConnectionInfo | null>;
 
   // Scraping operations
   manualScrape: () => Promise<ManualScrapeResult>;
@@ -115,6 +128,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   searchSlackKeywords: (keywords: string, lastScrapeDate?: number) =>
     ipcRenderer.invoke('search-slack-keywords', keywords, lastScrapeDate),
   openSlackMessage: (url: string) => ipcRenderer.invoke('open-slack-message', url),
+
+  // Platform connection operations
+  getPlatformConnectionInfo: (platform: string) => ipcRenderer.invoke('get-platform-connection-info', platform),
 
   // Scraping operations
   manualScrape: () => ipcRenderer.invoke('manual-scrape'),

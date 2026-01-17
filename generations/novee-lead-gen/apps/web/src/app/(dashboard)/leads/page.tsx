@@ -155,6 +155,8 @@ export default function LeadsPage() {
   const [updatingLeadId, setUpdatingLeadId] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [showingDemoLeads, setShowingDemoLeads] = useState(false);
+  const [hasKeywords, setHasKeywords] = useState(true); // Default to true to hide prompts initially
+  const [hasConnectedPlatforms, setHasConnectedPlatforms] = useState(true); // Default to true to hide prompts initially
   const [expandedLeads, setExpandedLeads] = useState<Set<string>>(new Set());
 
   // Pagination state
@@ -198,8 +200,16 @@ export default function LeadsPage() {
     setPlatformFilter(platform ? platform.toLowerCase() : '');
 
     // Sync keyword/skill filter from URL (or reset to empty if not present)
+    // Match case-insensitively against userKeywords to get the correct casing
     const keyword = searchParams.get('keyword') || searchParams.get('skill');
-    setSkillFilter(keyword || '');
+    if (keyword && userKeywords.length > 0) {
+      const matchedKeyword = userKeywords.find(
+        (k) => k.toLowerCase() === keyword.toLowerCase()
+      );
+      setSkillFilter(matchedKeyword || keyword);
+    } else {
+      setSkillFilter(keyword || '');
+    }
 
     // Sync date range from URL (or reset to empty if not present)
     const date = searchParams.get('date');
@@ -223,7 +233,7 @@ export default function LeadsPage() {
     } else {
       setCurrentPage(1);
     }
-  }, [searchParams]);
+  }, [searchParams, userKeywords]);
 
   // Test mode: inject a fake lead with a non-existent ID for testing graceful error handling
   const testMode = searchParams.get('test') === 'deleted-lead';
@@ -348,6 +358,8 @@ export default function LeadsPage() {
         setLeads(transformedLeads);
         setUserName(data.userName || '');
         setShowingDemoLeads(data.showingDemoLeads || false);
+        setHasKeywords(data.hasKeywords ?? true);
+        setHasConnectedPlatforms(data.hasConnectedPlatforms ?? true);
 
         // Update pagination state from API response
         setTotalPages(data.totalPages || 1);
@@ -661,7 +673,7 @@ export default function LeadsPage() {
         )}
       </div>
 
-      {/* Demo Leads Banner */}
+      {/* Demo Leads Banner - Show whenever we're displaying demo leads */}
       {showingDemoLeads && sortedLeads.length > 0 && (
         <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
           <div className="flex items-start gap-3">
@@ -673,23 +685,45 @@ export default function LeadsPage() {
             <div className="flex-1">
               <h3 className="font-medium text-blue-900">These are example leads</h3>
               <p className="text-sm text-blue-700 mt-1">
-                Connect your platforms and set up keywords to start finding real leads tailored to your skills.
-                These examples show what your lead feed will look like once configured.
+                {!hasConnectedPlatforms && !hasKeywords
+                  ? 'Connect your platforms and set up keywords to start finding real leads tailored to your skills.'
+                  : !hasConnectedPlatforms
+                  ? 'Connect your platforms to start finding real leads based on your keywords.'
+                  : !hasKeywords
+                  ? 'Set up keywords to start finding real leads from your connected platforms.'
+                  : 'Your platforms are connected and keywords are set up. Real leads will appear here once our scraper finds matches.'}
+                {' '}These examples show what your lead feed will look like.
               </p>
-              <p className="text-sm text-blue-600 mt-2 flex items-center gap-1">
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                Next scan scheduled after platform connection
-              </p>
-              <div className="mt-3 flex gap-3">
-                <Link href="/platforms" className="text-sm font-medium text-blue-600 hover:text-blue-800">
-                  Connect Platforms →
-                </Link>
-                <Link href="/keywords" className="text-sm font-medium text-blue-600 hover:text-blue-800">
-                  Set Up Keywords →
-                </Link>
-              </div>
+              {(!hasConnectedPlatforms || !hasKeywords) && (
+                <p className="text-sm text-blue-600 mt-2 flex items-center gap-1">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  {!hasConnectedPlatforms ? 'Next scan scheduled after platform connection' : 'Next scan scheduled after keywords are set up'}
+                </p>
+              )}
+              {hasConnectedPlatforms && hasKeywords && (
+                <p className="text-sm text-blue-600 mt-2 flex items-center gap-1">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                  </svg>
+                  All set! Waiting for real leads to be discovered.
+                </p>
+              )}
+              {(!hasConnectedPlatforms || !hasKeywords) && (
+                <div className="mt-3 flex gap-3">
+                  {!hasConnectedPlatforms && (
+                    <Link href="/platforms" className="text-sm font-medium text-blue-600 hover:text-blue-800">
+                      Connect Platforms →
+                    </Link>
+                  )}
+                  {!hasKeywords && (
+                    <Link href="/keywords" className="text-sm font-medium text-blue-600 hover:text-blue-800">
+                      Set Up Keywords →
+                    </Link>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         </div>

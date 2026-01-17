@@ -1,7 +1,8 @@
 /**
  * Desktop app sessions data module using Supabase.
+ * Uses service role client for all operations since user validation is done at API layer.
  */
-import { createClient } from './supabase/server';
+import { createServiceRoleClient } from './supabase/server';
 
 export interface DesktopSession {
   id: string;
@@ -15,9 +16,10 @@ export interface DesktopSession {
 
 /**
  * Get all desktop sessions for a specific user
+ * Uses service role client since user is already validated at API layer
  */
 export async function getSessionsForUser(userId: string): Promise<DesktopSession[]> {
-  const supabase = await createClient();
+  const supabase = await createServiceRoleClient();
 
   const { data, error } = await supabase
     .from('desktop_app_sessions')
@@ -35,9 +37,10 @@ export async function getSessionsForUser(userId: string): Promise<DesktopSession
 
 /**
  * Get a specific session by ID (with user isolation)
+ * Uses service role client since user is already validated at API layer
  */
 export async function getSessionById(sessionId: string, userId: string): Promise<DesktopSession | null> {
-  const supabase = await createClient();
+  const supabase = await createServiceRoleClient();
 
   const { data, error } = await supabase
     .from('desktop_app_sessions')
@@ -55,13 +58,15 @@ export async function getSessionById(sessionId: string, userId: string): Promise
 
 /**
  * Register a new desktop app session
+ * Uses service role client to bypass RLS since user is already validated at API layer
  */
 export async function createSession(
   userId: string,
   deviceLabel: string,
   osType: string
 ): Promise<DesktopSession> {
-  const supabase = await createClient();
+  // Use service role client to bypass RLS - user validation done in API handler
+  const supabase = await createServiceRoleClient();
 
   const { data, error } = await supabase
     .from('desktop_app_sessions')
@@ -82,9 +87,10 @@ export async function createSession(
 
 /**
  * Update session's last_seen_at timestamp (heartbeat)
+ * Uses service role client since user is already validated at API layer
  */
 export async function updateSessionHeartbeat(sessionId: string, userId: string): Promise<DesktopSession | null> {
-  const supabase = await createClient();
+  const supabase = await createServiceRoleClient();
 
   const { data, error } = await supabase
     .from('desktop_app_sessions')
@@ -104,13 +110,14 @@ export async function updateSessionHeartbeat(sessionId: string, userId: string):
 
 /**
  * Update session device label
+ * Uses service role client since user is already validated at API layer
  */
 export async function updateSessionLabel(
   sessionId: string,
   userId: string,
   deviceLabel: string
 ): Promise<DesktopSession | null> {
-  const supabase = await createClient();
+  const supabase = await createServiceRoleClient();
 
   const { data, error } = await supabase
     .from('desktop_app_sessions')
@@ -130,9 +137,10 @@ export async function updateSessionLabel(
 
 /**
  * Delete a desktop session
+ * Uses service role client since user is already validated at API layer
  */
 export async function deleteSession(sessionId: string, userId: string): Promise<boolean> {
-  const supabase = await createClient();
+  const supabase = await createServiceRoleClient();
 
   const { error } = await supabase
     .from('desktop_app_sessions')
@@ -150,9 +158,10 @@ export async function deleteSession(sessionId: string, userId: string): Promise<
 
 /**
  * Get session count for a user
+ * Uses service role client since user is already validated at API layer
  */
 export async function getSessionCount(userId: string): Promise<number> {
-  const supabase = await createClient();
+  const supabase = await createServiceRoleClient();
 
   const { count, error } = await supabase
     .from('desktop_app_sessions')

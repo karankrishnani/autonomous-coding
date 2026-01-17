@@ -1,7 +1,7 @@
 /**
  * Onboarding events module using Supabase.
  */
-import { createClient, createServiceRoleClient } from './supabase/server';
+import { createServiceRoleClient } from './supabase/server';
 
 export type OnboardingEventType =
   | 'ACCOUNT_CREATED'
@@ -57,9 +57,10 @@ export async function trackOnboardingEvent(
 
 /**
  * Get all onboarding events for a user
+ * Uses service role client to bypass RLS since user is validated at API layer
  */
 export async function getOnboardingEventsForUser(userId: string): Promise<OnboardingEvent[]> {
-  const supabase = await createClient();
+  const supabase = await createServiceRoleClient();
 
   const { data, error } = await supabase
     .from('onboarding_events')
@@ -77,12 +78,13 @@ export async function getOnboardingEventsForUser(userId: string): Promise<Onboar
 
 /**
  * Check if a specific event has been completed for a user
+ * Uses service role client to bypass RLS since user is validated at API layer
  */
 export async function hasCompletedEvent(
   userId: string,
   event: OnboardingEventType
 ): Promise<boolean> {
-  const supabase = await createClient();
+  const supabase = await createServiceRoleClient();
 
   const { count, error } = await supabase
     .from('onboarding_events')

@@ -1,11 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionUser } from '@/lib/auth';
-
-/**
- * In-memory storage for fingerprints (development only)
- * In production, this would be stored in Supabase user_fingerprints table
- */
-const fingerprints: Map<string, { fingerprint: object; collected_at: string }> = new Map();
+import { getFingerprintForUser, upsertFingerprint } from '@/lib/fingerprints';
+import { trackOnboardingEvent, hasCompletedEvent } from '@/lib/onboarding';
 
 /**
  * POST /api/user/fingerprint
@@ -28,17 +24,28 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Store fingerprint for user
-    const collected_at = new Date().toISOString();
-    fingerprints.set(user.id, {
-      fingerprint,
-      collected_at,
-    });
+    // Store fingerprint in database
+    const stored = await upsertFingerprint(user.id, fingerprint);
+
+    // Track BROWSER_FINGERPRINT_CAPTURED event if not already tracked
+    const alreadyCaptured = await hasCompletedEvent(user.id, 'BROWSER_FINGERPRINT_CAPTURED');
+    if (!alreadyCaptured) {
+      try {
+        await trackOnboardingEvent(user.id, 'BROWSER_FINGERPRINT_CAPTURED', {
+          user_agent: fingerprint.userAgent || null,
+          screen_resolution: fingerprint.screenResolution || null,
+          timezone: fingerprint.timezone || null,
+        });
+      } catch (trackError) {
+        // Log but don't fail if tracking fails
+        console.error('Failed to track fingerprint event:', trackError);
+      }
+    }
 
     return NextResponse.json(
       {
         message: 'Fingerprint stored successfully',
-        collected_at,
+        collected_at: stored.collected_at,
       },
       { status: 201 }
     );
@@ -62,7 +69,7 @@ export async function GET() {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const stored = fingerprints.get(user.id);
+    const stored = await getFingerprintForUser(user.id);
     if (!stored) {
       return NextResponse.json(
         { error: 'No fingerprint stored for this user' },

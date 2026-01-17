@@ -61,7 +61,7 @@ export default function PrivacyPage() {
             <h2 className="text-xl font-semibold text-gray-900 mb-4">5. Contact Us</h2>
             <p className="text-gray-600 mb-4">
               If you have any questions about this Privacy Policy, please contact us at
-              privacy@novee.io.
+              privacy@novee.tech.
             </p>
           </section>
         </div>

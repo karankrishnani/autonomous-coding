@@ -27,8 +27,8 @@ export default function SupportPage() {
             <div className="space-y-3">
               <p className="text-gray-600">
                 <span className="font-medium">Email:</span>{' '}
-                <a href="mailto:support@novee.io" className="text-primary hover:underline">
-                  support@novee.io
+                <a href="mailto:support@novee.tech" className="text-primary hover:underline">
+                  support@novee.tech
                 </a>
               </p>
               <p className="text-gray-600">

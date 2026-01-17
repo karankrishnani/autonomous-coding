@@ -10,6 +10,7 @@ import {
   PlatformConnectionStatus,
 } from '@/lib/platforms';
 import { getScrapeStats } from '@/lib/scrape-logs';
+import { trackOnboardingEvent, hasCompletedEvent } from '@/lib/onboarding';
 
 /**
  * GET /api/platforms/connections
@@ -133,6 +134,12 @@ export async function PUT(request: NextRequest) {
       );
     }
 
+    // Check if this is the first platform connection for this user
+    const existingConnections = await getConnectionsForUser(user.id);
+    const existingConnection = await getConnectionByPlatform(user.id, platform as PlatformType);
+    const hadConnectedPlatforms = existingConnections.some(c => c.status === 'CONNECTED');
+    const wasAlreadyConnected = existingConnection?.status === 'CONNECTED';
+
     // Update or create connection with metadata
     const connection = await updatePlatformMetadata(
       user.id,
@@ -140,6 +147,19 @@ export async function PUT(request: NextRequest) {
       metadata,
       status as PlatformConnectionStatus | undefined
     );
+
+    // Track PLATFORM_CONNECTED event if this is the first time connecting any platform
+    if (status === 'CONNECTED' && !hadConnectedPlatforms && !wasAlreadyConnected) {
+      // Check if we've already tracked this event (edge case protection)
+      const alreadyTracked = await hasCompletedEvent(user.id, 'PLATFORM_CONNECTED');
+      if (!alreadyTracked) {
+        await trackOnboardingEvent(user.id, 'PLATFORM_CONNECTED', {
+          platform: platform,
+          connection_id: connection.id,
+          timestamp: new Date().toISOString(),
+        }, connection.id);
+      }
+    }
 
     return NextResponse.json({
       success: true,

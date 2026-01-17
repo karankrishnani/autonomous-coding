@@ -9,6 +9,9 @@ import {
 import { PlatformCard } from '@/components/PlatformCard';
 import Link from 'next/link';
 
+// Ensure page always fetches fresh data
+export const dynamic = 'force-dynamic';
+
 // Platform configuration
 const PLATFORMS = [
   {

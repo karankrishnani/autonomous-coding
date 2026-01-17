@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 
 type Platform = 'mac' | 'windows' | 'linux' | 'unknown';
@@ -56,10 +56,53 @@ function detectPlatform(): Platform {
 export default function DownloadPage() {
   const [platform, setPlatform] = useState<Platform>('unknown');
   const [activeTab, setActiveTab] = useState<TabType>('text');
+  const [downloadTracked, setDownloadTracked] = useState(false);
 
   useEffect(() => {
     setPlatform(detectPlatform());
   }, []);
+
+  // Track download event when user clicks download button
+  const trackDownload = useCallback(async (downloadPlatform: string, format: string): Promise<boolean> => {
+    // Only track once per session to avoid duplicate events
+    if (downloadTracked) return true;
+
+    try {
+      const response = await fetch('/api/onboarding/events', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include', // Include cookies for authentication
+        body: JSON.stringify({
+          event: 'DESKTOP_DOWNLOADED',
+          metadata: {
+            platform: downloadPlatform,
+            format,
+            timestamp: new Date().toISOString(),
+          },
+        }),
+      });
+      if (response.ok) {
+        setDownloadTracked(true);
+        return true;
+      }
+      return false;
+    } catch (error) {
+      // Don't block download if tracking fails (e.g., user not logged in)
+      console.error('Failed to track download event:', error);
+      return false;
+    }
+  }, [downloadTracked]);
+
+  // Handle download button click
+  const handleDownloadClick = async (e: React.MouseEvent<HTMLAnchorElement>, downloadPlatform: string, format: string, downloadUrl: string) => {
+    e.preventDefault(); // Prevent immediate navigation
+
+    // Track the event first
+    await trackDownload(downloadPlatform, format);
+
+    // Then trigger the download
+    window.location.href = downloadUrl;
+  };
 
   const currentPlatform = platform !== 'unknown' ? platformData[platform] : platformData.mac;
 
@@ -177,6 +220,7 @@ export default function DownloadPage() {
               className="btn-primary inline-flex items-center gap-2"
               data-platform={platform}
               data-format={currentPlatform.installerFormat}
+              onClick={(e) => handleDownloadClick(e, currentPlatform.name, currentPlatform.installerFormat, currentPlatform.downloadUrl)}
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
@@ -189,15 +233,15 @@ export default function DownloadPage() {
               <p className="text-sm text-gray-500">
                 Not on {currentPlatform.name}?{' '}
                 {platform !== 'mac' && (
-                  <a href={platformData.mac.downloadUrl} className="text-primary hover:underline">macOS</a>
+                  <a href={platformData.mac.downloadUrl} className="text-primary hover:underline" onClick={(e) => handleDownloadClick(e, 'macOS', '.dmg', platformData.mac.downloadUrl)}>macOS</a>
                 )}
                 {platform !== 'mac' && platform !== 'windows' && ' • '}
                 {platform !== 'windows' && (
-                  <a href={platformData.windows.downloadUrl} className="text-primary hover:underline">Windows</a>
+                  <a href={platformData.windows.downloadUrl} className="text-primary hover:underline" onClick={(e) => handleDownloadClick(e, 'Windows', '.exe', platformData.windows.downloadUrl)}>Windows</a>
                 )}
                 {platform !== 'linux' && ' • '}
                 {platform !== 'linux' && (
-                  <a href={platformData.linux.downloadUrl} className="text-primary hover:underline">Linux</a>
+                  <a href={platformData.linux.downloadUrl} className="text-primary hover:underline" onClick={(e) => handleDownloadClick(e, 'Linux', '.AppImage', platformData.linux.downloadUrl)}>Linux</a>
                 )}
               </p>
             </div>
@@ -282,7 +326,7 @@ export default function DownloadPage() {
               </div>
 
               <div className="text-center mt-8">
-                <a href={currentPlatform.downloadUrl} className="btn-primary inline-flex items-center gap-2">
+                <a href={currentPlatform.downloadUrl} className="btn-primary inline-flex items-center gap-2" onClick={(e) => handleDownloadClick(e, currentPlatform.name, currentPlatform.installerFormat, currentPlatform.downloadUrl)}>
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
                   </svg>
@@ -309,7 +353,7 @@ export default function DownloadPage() {
           {activeTab === 'help' && (
             <div className="max-w-2xl mx-auto text-center">
               <p className="text-gray-600 mb-6">Need help getting started? Schedule a call with our support team.</p>
-              <a href="mailto:support@novee.io" className="btn-secondary">
+              <a href="mailto:support@novee.tech" className="btn-secondary">
                 Schedule a Call
               </a>
             </div>
@@ -337,7 +381,7 @@ export default function DownloadPage() {
 
         {/* Bottom CTA */}
         <div className="text-center mt-12">
-          <a href={currentPlatform.downloadUrl} className="btn-primary inline-flex items-center gap-2">
+          <a href={currentPlatform.downloadUrl} className="btn-primary inline-flex items-center gap-2" onClick={(e) => handleDownloadClick(e, currentPlatform.name, currentPlatform.installerFormat, currentPlatform.downloadUrl)}>
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
             </svg>

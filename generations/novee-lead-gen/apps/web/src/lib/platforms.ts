@@ -36,9 +36,10 @@ export interface PlatformConnectionWithScrape extends PlatformConnection {
 
 /**
  * Get all platform connections for a user with last scrape info
+ * Uses service role client to bypass RLS since user is validated at API layer
  */
 export async function getConnectionsForUser(userId: string): Promise<PlatformConnectionWithScrape[]> {
-  const supabase = await createClient();
+  const supabase = await createServiceRoleClient();
 
   // Get connections
   const { data: connections, error } = await supabase
@@ -87,9 +88,10 @@ export async function getConnectionsForUser(userId: string): Promise<PlatformCon
 
 /**
  * Get a platform connection by ID for a user
+ * Uses service role client to bypass RLS since user is validated at API layer
  */
 export async function getConnectionById(userId: string, connectionId: string): Promise<PlatformConnection | null> {
-  const supabase = await createClient();
+  const supabase = await createServiceRoleClient();
   const { data, error } = await supabase
     .from('platform_connections')
     .select('*')
@@ -105,10 +107,11 @@ export async function getConnectionById(userId: string, connectionId: string): P
 }
 
 /**
- * Get a platform connection by platform type for a user
+ * Get a specific platform connection for a user
+ * Uses service role client to bypass RLS since user is validated at API layer
  */
 export async function getConnectionByPlatform(userId: string, platform: PlatformType): Promise<PlatformConnection | null> {
-  const supabase = await createClient();
+  const supabase = await createServiceRoleClient();
   const { data, error } = await supabase
     .from('platform_connections')
     .select('*')
@@ -155,6 +158,7 @@ export async function createConnection(
 
 /**
  * Update a platform connection status
+ * Uses service role client to bypass RLS since user is validated at API layer
  */
 export async function updateConnectionStatus(
   userId: string,
@@ -162,7 +166,7 @@ export async function updateConnectionStatus(
   status: PlatformConnectionStatus,
   lastError?: string
 ): Promise<PlatformConnection | null> {
-  const supabase = await createClient();
+  const supabase = await createServiceRoleClient();
   const now = new Date().toISOString();
 
   // First check if this connection belongs to the user
@@ -378,6 +382,25 @@ export async function logScraperError(
 
   // Update existing connection with error
   return await updateConnectionStatus(userId, connection.id, 'DEGRADED', errorMessage);
+}
+
+/**
+ * Log a successful scrape for a platform connection
+ * Updates last_checked_at and clears last_error
+ */
+export async function logScraperSuccess(
+  userId: string,
+  platform: PlatformType
+): Promise<PlatformConnection | null> {
+  // Find the connection for this platform
+  const connection = await getConnectionByPlatform(userId, platform);
+
+  if (!connection) {
+    return null;
+  }
+
+  // Update existing connection - clear error and update last_checked_at
+  return await updateConnectionStatus(userId, connection.id, 'CONNECTED');
 }
 
 /**

@@ -37,6 +37,9 @@ const scrapeStatusText = document.getElementById('scrape-status-text') as HTMLEl
 const scrapeProgressFill = document.getElementById('scrape-progress-fill') as HTMLElement | null;
 const scrapeDetails = document.getElementById('scrape-details') as HTMLElement | null;
 
+// Last scrape time element
+const slackLastScrape = document.getElementById('slack-last-scrape') as HTMLElement | null;
+
 // =============================================================================
 // User Interface
 // =============================================================================
@@ -45,6 +48,33 @@ interface UserInfo {
   id: string;
   email: string;
   name: string;
+}
+
+/**
+ * Format a date as a relative time string (e.g., "2 minutes ago", "3 hours ago")
+ */
+function formatRelativeTime(dateString: string): string {
+  const date = new Date(dateString);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffSeconds = Math.floor(diffMs / 1000);
+  const diffMinutes = Math.floor(diffSeconds / 60);
+  const diffHours = Math.floor(diffMinutes / 60);
+  const diffDays = Math.floor(diffHours / 24);
+
+  if (diffSeconds < 60) {
+    return 'Just now';
+  } else if (diffMinutes < 60) {
+    return `${diffMinutes} minute${diffMinutes > 1 ? 's' : ''} ago`;
+  } else if (diffHours < 24) {
+    return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
+  } else if (diffDays === 1) {
+    return 'Yesterday';
+  } else if (diffDays < 7) {
+    return `${diffDays} days ago`;
+  } else {
+    return date.toLocaleDateString();
+  }
 }
 
 /**
@@ -84,8 +114,31 @@ async function refreshPlatformStatus() {
     const workspaces = await window.electronAPI.getSlackWorkspaces();
     console.log('[UI] Fetched workspaces:', workspaces.length);
     updateSlackStatus(workspaces.length > 0, workspaces.length);
+
+    // Fetch and display last scrape time
+    const connectionInfo = await window.electronAPI.getPlatformConnectionInfo('SLACK');
+    if (connectionInfo?.lastCheckedAt) {
+      updateLastScrapeTime(connectionInfo.lastCheckedAt);
+    } else {
+      updateLastScrapeTime(null);
+    }
   } catch (error) {
     console.error('[UI] Failed to fetch platform status:', error);
+  }
+}
+
+/**
+ * Update the last scrape time display
+ */
+function updateLastScrapeTime(lastCheckedAt: string | null) {
+  if (!slackLastScrape) return;
+
+  if (lastCheckedAt) {
+    slackLastScrape.textContent = `Last scraped: ${formatRelativeTime(lastCheckedAt)}`;
+    slackLastScrape.classList.remove('hidden');
+  } else {
+    slackLastScrape.textContent = 'Never scraped';
+    slackLastScrape.classList.remove('hidden');
   }
 }
 
@@ -389,6 +442,9 @@ async function handleScrapeNow() {
 
     if (result.success) {
       updateScrapeProgress('completed', 100, `Found ${result.leadsFound || 0} potential leads`);
+
+      // Refresh platform status to update last scrape time
+      await refreshPlatformStatus();
 
       // Hide progress after 3 seconds
       setTimeout(() => {

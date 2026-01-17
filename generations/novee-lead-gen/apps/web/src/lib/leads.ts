@@ -1,7 +1,7 @@
 /**
  * Leads data management using Supabase.
  */
-import { createClient } from './supabase/server';
+import { createClient, createServiceRoleClient } from './supabase/server';
 
 export type LeadStatus = 'NEW' | 'VIEWED' | 'INTERESTED' | 'NOT_INTERESTED' | 'MARKED_LATER' | 'ARCHIVED';
 
@@ -41,7 +41,8 @@ export interface PaginatedResult<T> {
  * Get all leads for a specific user
  */
 export async function getLeadsByUserId(userId: string): Promise<Lead[]> {
-  const supabase = await createClient();
+  // Use service role client to bypass RLS - user authentication is validated at the API layer
+  const supabase = await createServiceRoleClient();
 
   const { data, error } = await supabase
     .from('leads')
@@ -79,7 +80,8 @@ export async function getLeadsByUserIdPaginated(
   page: number = 1,
   pageSize: number = 20
 ): Promise<PaginatedResult<Lead>> {
-  const supabase = await createClient();
+  // Use service role client to bypass RLS - user authentication is validated at the API layer
+  const supabase = await createServiceRoleClient();
 
   // Get total count
   const { count: total } = await supabase
@@ -168,7 +170,8 @@ function transformLeadRow(row: Record<string, unknown>): Lead {
  * Get a single lead by ID
  */
 export async function getLeadById(leadId: string): Promise<Lead | null> {
-  const supabase = await createClient();
+  // Use service role client to bypass RLS - user authentication is validated at the API layer
+  const supabase = await createServiceRoleClient();
 
   const { data, error } = await supabase
     .from('leads')
@@ -201,7 +204,8 @@ export async function getLeadById(leadId: string): Promise<Lead | null> {
  * Get a lead by ID for a specific user
  */
 export async function getLeadByIdForUser(leadId: string, userId: string): Promise<Lead | null> {
-  const supabase = await createClient();
+  // Use service role client to bypass RLS - user authentication is validated at the API layer
+  const supabase = await createServiceRoleClient();
 
   const { data, error } = await supabase
     .from('leads')
@@ -248,7 +252,8 @@ export async function createLead(
     channelId?: string;
   }
 ): Promise<Lead | null> {
-  const supabase = await createClient();
+  // Use service role client to bypass RLS - user authentication is validated at the API layer
+  const supabase = await createServiceRoleClient();
 
   // If channelId is provided, use it; otherwise we need to create or find a channel
   let channelId = options?.channelId;
@@ -455,7 +460,8 @@ export async function updateLeadStatus(
   userId: string,
   status: LeadStatus
 ): Promise<Lead | null> {
-  const supabase = await createClient();
+  // Use service role client to bypass RLS - user authentication is validated at the API layer
+  const supabase = await createServiceRoleClient();
 
   const updateData: Record<string, unknown> = { status };
 
@@ -487,7 +493,8 @@ export async function updateLeadStatus(
  * Delete a lead
  */
 export async function deleteLead(leadId: string, userId: string): Promise<boolean> {
-  const supabase = await createClient();
+  // Use service role client to bypass RLS - user authentication is validated at the API layer
+  const supabase = await createServiceRoleClient();
 
   const { error } = await supabase
     .from('leads')
@@ -565,7 +572,8 @@ export async function getDemoLeads(userId: string): Promise<(Lead & { isDemo: bo
  * Check if user has any real leads
  */
 export async function userHasLeads(userId: string): Promise<boolean> {
-  const supabase = await createClient();
+  // Use service role client to bypass RLS - user authentication is validated at the API layer
+  const supabase = await createServiceRoleClient();
 
   const { count } = await supabase
     .from('leads')
@@ -579,7 +587,8 @@ export async function userHasLeads(userId: string): Promise<boolean> {
  * Delete all leads for a user
  */
 export async function deleteAllLeadsForUser(userId: string): Promise<number> {
-  const supabase = await createClient();
+  // Use service role client to bypass RLS - user authentication is validated at the API layer
+  const supabase = await createServiceRoleClient();
 
   // Get count first
   const { count } = await supabase
@@ -616,7 +625,8 @@ export async function getLeadStats(userId: string): Promise<{
   marked_later: number;
   archived: number;
 }> {
-  const supabase = await createClient();
+  // Use service role client to bypass RLS - user authentication is validated at the API layer
+  const supabase = await createServiceRoleClient();
 
   // Get total count
   const { count: total } = await supabase

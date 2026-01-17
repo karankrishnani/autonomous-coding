@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionUser } from '@/lib/auth';
 import { getLeadsByUserIdPaginated, createLead, getLeadStats, getDemoLeads, userHasLeads } from '@/lib/leads';
+import { getAllKeywordsForUser } from '@/lib/keywords';
+import { getConnectionsForUser } from '@/lib/platforms';
 
 /**
  * GET /api/leads - List leads for the authenticated user
@@ -33,10 +35,18 @@ export async function GET(request: NextRequest) {
     const platformFilter = searchParams.get('platform')?.toUpperCase();
     const keywordFilter = searchParams.get('keyword');
 
-    // Get paginated leads for the user
-    const paginatedResult = await getLeadsByUserIdPaginated(user.id, page, limit);
-    const stats = await getLeadStats(user.id);
-    const hasRealLeads = await userHasLeads(user.id);
+    // Get paginated leads, stats, keywords, and platforms in parallel
+    const [paginatedResult, stats, hasRealLeads, userKeywords, platformConnections] = await Promise.all([
+      getLeadsByUserIdPaginated(user.id, page, limit),
+      getLeadStats(user.id),
+      userHasLeads(user.id),
+      getAllKeywordsForUser(user.id),
+      getConnectionsForUser(user.id),
+    ]);
+
+    // Check if user has completed onboarding steps
+    const hasKeywords = userKeywords.length > 0;
+    const hasConnectedPlatforms = platformConnections.some(c => c.status === 'CONNECTED');
 
     // If user has no real leads, show demo leads
     let responseLeads = paginatedResult.data;
@@ -93,6 +103,9 @@ export async function GET(request: NextRequest) {
       } : stats,
       userName: user.name,
       showingDemoLeads,
+      // Onboarding status for conditional prompts
+      hasKeywords,
+      hasConnectedPlatforms,
     });
   } catch (error) {
     console.error('Leads API error:', error);
@@ -120,7 +133,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { content, keywords, platform, channelName, senderName } = body;
+    const { content, keywords, platform, channelName, senderName, sourceUrl } = body;
 
     // Validate required fields
     if (!content || typeof content !== 'string' || content.trim() === '') {
@@ -137,11 +150,12 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Create the lead
+    // Create the lead with sourceUrl for permalink
     const lead = await createLead(user.id, content, keywords, {
       platform: platform || 'SLACK',
       channelName: channelName || 'general',
       senderName: senderName || 'Test User',
+      sourceUrl: sourceUrl || undefined,
     });
 
     return NextResponse.json({ lead }, { status: 201 });
