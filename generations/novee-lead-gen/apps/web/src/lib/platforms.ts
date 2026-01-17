@@ -122,19 +122,20 @@ export async function getConnectionByPlatform(userId: string, platform: Platform
   if (error) {
     return null;
   }
-
+  
   return data as PlatformConnection;
 }
 
 /**
  * Create a new platform connection
+ * Uses service role client to bypass RLS since user is validated at API layer
  */
 export async function createConnection(
   userId: string,
   platform: PlatformType,
   status: PlatformConnectionStatus = 'PENDING'
 ): Promise<PlatformConnection> {
-  const supabase = await createClient();
+  const supabase = await createServiceRoleClient();
   const now = new Date().toISOString();
 
   const { data, error } = await supabase
@@ -314,9 +315,10 @@ export async function updatePlatformMetadata(
 
 /**
  * Delete a platform connection
+ * Uses service role client to bypass RLS since user is validated at API layer
  */
 export async function deleteConnection(userId: string, connectionId: string): Promise<boolean> {
-  const supabase = await createClient();
+  const supabase = await createServiceRoleClient();
 
   const { error } = await supabase
     .from('platform_connections')

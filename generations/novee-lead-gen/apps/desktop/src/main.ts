@@ -1052,12 +1052,27 @@ async function fetchUserKeywords(session: SessionData): Promise<string[]> {
 }
 
 /**
+ * Progress callback for keyword-level updates during scraping
+ */
+type ScrapeProgressCallback = (progress: {
+  workspaceIndex: number;
+  totalWorkspaces: number;
+  workspaceName: string;
+  keywordIndex: number;
+  totalKeywords: number;
+  currentKeyword: string;
+}) => void;
+
+/**
  * Scrape a single workspace for all keywords and log results to the API
  */
 async function scrapeWorkspace(
   workspace: WorkspaceInfo,
   keywords: string[],
-  session: SessionData
+  session: SessionData,
+  progressCallback?: ScrapeProgressCallback,
+  workspaceIndex: number = 0,
+  totalWorkspaces: number = 1
 ): Promise<WorkspaceScrapeResult> {
   const result: WorkspaceScrapeResult = {
     workspaceName: workspace.name,
@@ -1145,9 +1160,22 @@ async function scrapeWorkspace(
     }
 
     // Search for each keyword sequentially using real Playwright scraping
-    for (const keyword of keywords) {
+    for (let keywordIndex = 0; keywordIndex < keywords.length; keywordIndex++) {
+      const keyword = keywords[keywordIndex];
       console.log(`[Scrape] Searching workspace ${workspace.name} for keyword: "${keyword}"`);
       result.keywordsSearched.push(keyword);
+
+      // Send keyword-level progress update
+      if (progressCallback) {
+        progressCallback({
+          workspaceIndex,
+          totalWorkspaces,
+          workspaceName: workspace.name,
+          keywordIndex,
+          totalKeywords: keywords.length,
+          currentKeyword: keyword,
+        });
+      }
 
       try {
         // Use real Playwright search with incremental scraping
@@ -1342,11 +1370,38 @@ ipcMain.handle('manual-scrape', async () => {
 
     console.log(`[Scrape] Starting manual scrape of ${workspaces.length} workspace(s)...`);
 
-    // Emit progress update to renderer
+    // Create progress callback that sends detailed updates to the renderer
+    const progressCallback: ScrapeProgressCallback = (progress) => {
+      if (mainWindow) {
+        // Calculate overall percentage: (workspaceIndex * totalKeywords + keywordIndex) / (totalWorkspaces * totalKeywords)
+        const totalSteps = progress.totalWorkspaces * progress.totalKeywords;
+        const currentStep = progress.workspaceIndex * progress.totalKeywords + progress.keywordIndex;
+        const percentComplete = Math.round((currentStep / totalSteps) * 100);
+
+        mainWindow.webContents.send('scraper-progress', {
+          currentWorkspace: progress.workspaceIndex + 1,
+          totalWorkspaces: progress.totalWorkspaces,
+          workspaceName: progress.workspaceName,
+          currentKeyword: progress.keywordIndex + 1,
+          totalKeywords: progress.totalKeywords,
+          keywordName: progress.currentKeyword,
+          percentComplete,
+          status: 'scraping',
+        });
+      }
+    };
+
+    // Emit initial progress update to renderer
     if (mainWindow) {
-      mainWindow.webContents.send('search-progress', {
-        current: 0,
-        total: workspaces.length,
+      mainWindow.webContents.send('scraper-progress', {
+        currentWorkspace: 0,
+        totalWorkspaces: workspaces.length,
+        workspaceName: '',
+        currentKeyword: 0,
+        totalKeywords: keywords.length,
+        keywordName: '',
+        percentComplete: 0,
+        status: 'starting',
       });
     }
 
@@ -1354,16 +1409,15 @@ ipcMain.handle('manual-scrape', async () => {
     const results: WorkspaceScrapeResult[] = [];
     for (let i = 0; i < workspaces.length; i++) {
       const workspace = workspaces[i];
-      const result = await scrapeWorkspace(workspace, keywords, session);
+      const result = await scrapeWorkspace(
+        workspace,
+        keywords,
+        session,
+        progressCallback,
+        i,
+        workspaces.length
+      );
       results.push(result);
-
-      // Emit progress update
-      if (mainWindow) {
-        mainWindow.webContents.send('search-progress', {
-          current: i + 1,
-          total: workspaces.length,
-        });
-      }
     }
 
     // Calculate totals
@@ -1449,14 +1503,43 @@ function startScraperScheduler(): void {
 
       console.log(`[Scheduler] Scraping ${workspaces.length} workspace(s) for ${keywords.length} keywords...`);
 
+      // Create progress callback for keyword-level updates
+      const scheduledProgressCallback: ScrapeProgressCallback = (progress) => {
+        if (mainWindow) {
+          const totalSteps = progress.totalWorkspaces * progress.totalKeywords;
+          const currentStep = progress.workspaceIndex * progress.totalKeywords + progress.keywordIndex;
+          const percentComplete = Math.round((currentStep / totalSteps) * 100);
+
+          mainWindow.webContents.send('scraper-progress', {
+            currentWorkspace: progress.workspaceIndex + 1,
+            totalWorkspaces: progress.totalWorkspaces,
+            workspaceName: progress.workspaceName,
+            currentKeyword: progress.keywordIndex + 1,
+            totalKeywords: progress.totalKeywords,
+            keywordName: progress.currentKeyword,
+            percentComplete,
+            status: 'scraping',
+          });
+        }
+      };
+
       try {
         // Scrape each workspace with all keywords
         let totalLeads = 0;
         let totalMessages = 0;
         let successCount = 0;
 
-        for (const workspace of workspaces) {
-          const result = await scrapeWorkspace(workspace, keywords, currentSession);
+        for (let i = 0; i < workspaces.length; i++) {
+          const workspace = workspaces[i];
+
+          const result = await scrapeWorkspace(
+            workspace,
+            keywords,
+            currentSession,
+            scheduledProgressCallback,
+            i,
+            workspaces.length
+          );
           if (result.success) {
             successCount++;
             totalLeads += result.leadsCreated;
@@ -1482,6 +1565,22 @@ function startScraperScheduler(): void {
         nextRun: state.nextScheduledRun?.toISOString(),
         lastSuccess: state.lastRunResult?.success,
       });
+
+      // Send state to renderer via IPC for UI updates
+      if (mainWindow) {
+        mainWindow.webContents.send('scraper-state-change', {
+          isRunning: state.isRunning,
+          nextScheduledRun: state.nextScheduledRun?.toISOString() || null,
+          lastRunResult: state.lastRunResult ? {
+            platform: state.lastRunResult.platform,
+            startTime: state.lastRunResult.startTime.toISOString(),
+            endTime: state.lastRunResult.endTime.toISOString(),
+            success: state.lastRunResult.success,
+            leadsFound: state.lastRunResult.leadsFound,
+            error: state.lastRunResult.error,
+          } : null,
+        });
+      }
     },
   });
 

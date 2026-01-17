@@ -75,6 +75,36 @@ interface ManualScrapeResult {
 }
 
 /**
+ * Scraper state change from scheduler
+ */
+interface ScraperStateChange {
+  isRunning: boolean;
+  nextScheduledRun: string | null;
+  lastRunResult: {
+    platform: string;
+    startTime: string;
+    endTime: string;
+    success: boolean;
+    leadsFound: number;
+    error?: string;
+  } | null;
+}
+
+/**
+ * Scraper progress update during scheduled scrape
+ */
+interface ScraperProgress {
+  currentWorkspace: number;
+  totalWorkspaces: number;
+  workspaceName: string;
+  currentKeyword?: number;
+  totalKeywords: number;
+  keywordName?: string;
+  percentComplete?: number;
+  status: 'starting' | 'scraping' | 'completed' | 'failed';
+}
+
+/**
  * Platform connection info
  */
 interface PlatformConnectionInfo {
@@ -112,6 +142,8 @@ interface ElectronAPI {
   // Event listeners
   onSlackWorkspaceCaptured: (callback: (workspaces: WorkspaceInfo[]) => void) => void;
   onSearchProgress: (callback: (progress: { current: number; total: number }) => void) => void;
+  onScraperStateChange: (callback: (state: ScraperStateChange) => void) => void;
+  onScraperProgress: (callback: (progress: ScraperProgress) => void) => void;
 }
 
 // Expose the API to the renderer
@@ -144,6 +176,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   onSearchProgress: (callback: (progress: { current: number; total: number }) => void) => {
     ipcRenderer.on('search-progress', (_event, progress) => callback(progress));
+  },
+  onScraperStateChange: (callback: (state: ScraperStateChange) => void) => {
+    ipcRenderer.on('scraper-state-change', (_event, state) => callback(state));
+  },
+  onScraperProgress: (callback: (progress: ScraperProgress) => void) => {
+    ipcRenderer.on('scraper-progress', (_event, progress) => callback(progress));
   },
 } as ElectronAPI);
 

@@ -560,12 +560,12 @@ export default function LeadsPage() {
       </div>
 
       {/* Tab Navigation */}
-      <div className="flex items-center gap-6 border-b border-gray-200 mb-6">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 sm:gap-x-6 border-b border-gray-200 mb-6 overflow-x-auto">
         {tabs.map((tab) => (
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
-            className={`pb-4 border-b-2 transition-colors ${
+            className={`pb-4 border-b-2 transition-colors whitespace-nowrap text-sm sm:text-base ${
               activeTab === tab.id
                 ? 'border-primary text-primary font-medium'
                 : 'border-transparent text-gray-500 hover:text-gray-700'
@@ -588,9 +588,9 @@ export default function LeadsPage() {
       </div>
 
       {/* Filters */}
-      <div className="flex items-center gap-4 mb-6">
+      <div className="flex flex-wrap items-center gap-2 sm:gap-4 mb-6">
         <select
-          className="input-field max-w-xs"
+          className="input-field w-full sm:w-auto sm:max-w-[140px] text-sm"
           value={skillFilter}
           onChange={(e) => {
             const newValue = e.target.value;
@@ -608,7 +608,7 @@ export default function LeadsPage() {
           ))}
         </select>
         <select
-          className="input-field max-w-xs"
+          className="input-field w-[calc(50%-4px)] sm:w-auto sm:max-w-[140px] text-sm"
           value={platformFilter}
           onChange={(e) => {
             const newValue = e.target.value;
@@ -623,7 +623,7 @@ export default function LeadsPage() {
           <option value="linkedin">LinkedIn</option>
         </select>
         <select
-          className="input-field max-w-xs"
+          className="input-field w-[calc(50%-4px)] sm:w-auto sm:max-w-[140px] text-sm"
           value={dateRange}
           onChange={(e) => {
             const newValue = e.target.value;
@@ -640,7 +640,7 @@ export default function LeadsPage() {
           <option value="month">This Month</option>
         </select>
         <select
-          className="input-field max-w-xs"
+          className="input-field w-full sm:w-auto sm:max-w-[180px] text-sm"
           value={sortOrder}
           onChange={(e) => {
             const newValue = e.target.value as 'newest' | 'oldest' | 'most_keywords';
@@ -666,7 +666,7 @@ export default function LeadsPage() {
               setCurrentPage(1);
               updateURL({ page: 1, skill: undefined, platform: undefined, date: undefined, sort: undefined });
             }}
-            className="text-sm text-gray-500 hover:text-gray-700"
+            className="text-sm text-gray-500 hover:text-gray-700 whitespace-nowrap"
           >
             Clear filters
           </button>

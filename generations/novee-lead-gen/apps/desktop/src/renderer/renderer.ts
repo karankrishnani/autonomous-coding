@@ -430,14 +430,11 @@ async function handleScrapeNow() {
   scrapeNowBtn.disabled = true;
   scrapeNowBtn.textContent = 'Scraping...';
 
-  // Show progress UI
-  updateScrapeProgress('running', 10, 'Initializing scrape...');
+  // Show progress UI starting at 0% - real progress will come via IPC events
+  updateScrapeProgress('running', 0, 'Starting scrape...');
 
   try {
-    // Simulate progress updates (in production, this would come from IPC events)
-    updateScrapeProgress('running', 25, 'Connecting to workspaces...');
-
-    // Call the manual scrape IPC handler
+    // Call the manual scrape IPC handler - progress updates will come via onScraperProgress
     const result = await window.electronAPI.manualScrape();
 
     if (result.success) {
@@ -509,6 +506,53 @@ function init() {
     window.electronAPI.onSlackWorkspaceCaptured((workspaces) => {
       console.log('Workspaces captured:', workspaces);
       updateSlackStatus(workspaces.length > 0, workspaces.length);
+    });
+
+    // Listen for scraper state changes (from 24-hour scheduler)
+    window.electronAPI.onScraperStateChange((state) => {
+      console.log('[UI] Scraper state changed:', state);
+
+      if (state.isRunning) {
+        // Show scrape progress UI when scheduled scrape starts at 0%
+        // Real progress updates will come via onScraperProgress
+        updateScrapeProgress('running', 0, 'Scheduled scrape starting...');
+      } else if (state.lastRunResult) {
+        // Update UI when scheduled scrape completes
+        if (state.lastRunResult.success) {
+          updateScrapeProgress('completed', 100, `Found ${state.lastRunResult.leadsFound} potential leads`);
+          // Refresh platform status to update last scrape time
+          refreshPlatformStatus();
+        } else {
+          updateScrapeProgress('failed', 100, state.lastRunResult.error || 'Scheduled scrape failed');
+        }
+
+        // Hide progress after a few seconds
+        setTimeout(() => {
+          updateScrapeProgress('idle', 0);
+        }, state.lastRunResult.success ? 3000 : 5000);
+      }
+    });
+
+    // Listen for detailed scraper progress updates during scheduled scrape
+    window.electronAPI.onScraperProgress((progress) => {
+      console.log('[UI] Scraper progress:', progress);
+
+      // Use the percentComplete from the event if available, otherwise calculate from workspace progress
+      const percentComplete = progress.percentComplete ?? Math.round((progress.currentWorkspace / progress.totalWorkspaces) * 100);
+
+      // Build detailed progress text
+      let details: string;
+      if (progress.status === 'starting') {
+        details = 'Starting scrape...';
+      } else if (progress.keywordName) {
+        // Show workspace and keyword-level detail
+        details = `Searching ${progress.workspaceName} for "${progress.keywordName}" (${progress.currentKeyword}/${progress.totalKeywords} keywords, ${progress.currentWorkspace}/${progress.totalWorkspaces} workspaces)`;
+      } else {
+        // Fallback to workspace-level detail
+        details = `Scanning ${progress.workspaceName} (${progress.currentWorkspace}/${progress.totalWorkspaces} workspaces, ${progress.totalKeywords} keywords)`;
+      }
+
+      updateScrapeProgress('running', percentComplete, details);
     });
   }
 

@@ -303,6 +303,50 @@ export async function logScraperErrorToAPI(
   }
 }
 
+/**
+ * Log a successful scrape to the backend API
+ *
+ * This function is called when a scraper operation completes successfully.
+ * It updates last_checked_at and clears last_error in the platform_connections table.
+ *
+ * @param apiBaseUrl - Base URL of the web API
+ * @param platform - Platform that succeeded (SLACK or LINKEDIN)
+ * @param authToken - User's authentication token
+ */
+export async function logScraperSuccessToAPI(
+  apiBaseUrl: string,
+  platform: string,
+  authToken: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    console.log(`[Scraper] Logging success to API: ${platform}`);
+
+    const response = await fetch(`${apiBaseUrl}/api/scraper/success`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Cookie: authToken,
+      },
+      body: JSON.stringify({
+        platform: platform.toUpperCase(),
+      }),
+    });
+
+    if (!response.ok) {
+      const errorData = (await response.json()) as { error?: string };
+      console.error(`[Scraper] Failed to log success to API: ${errorData.error || response.status}`);
+      return { success: false, error: errorData.error || 'Failed to log success' };
+    }
+
+    const successData = (await response.json()) as { connection?: { status: string; last_checked_at?: string } };
+    console.log(`[Scraper] Success logged. Platform status: ${successData.connection?.status}, last_checked_at: ${successData.connection?.last_checked_at}`);
+    return { success: true };
+  } catch (error) {
+    console.error('[Scraper] Failed to log success to API:', error);
+    return { success: false, error: String(error) };
+  }
+}
+
 // =============================================================================
 // Scheduler Types and Utilities
 // =============================================================================
@@ -442,7 +486,15 @@ export class ScraperScheduler {
         retryAttempts: 0, // Retry attempts are handled within scrapeFunction
       };
 
-      if (!result.success && result.error) {
+      // Update platform connection at the END of scraping
+      if (result.success) {
+        // Log success to API to update last_checked_at
+        await logScraperSuccessToAPI(
+          this.apiBaseUrl,
+          this.platform,
+          this.authToken
+        );
+      } else if (result.error) {
         // Log error to API so it's visible in the dashboard
         await logScraperErrorToAPI(
           this.apiBaseUrl,
