@@ -26,6 +26,46 @@ FEATURE_MCP_TOOLS = [
     "mcp__features__feature_create_bulk",
 ]
 
+# Desktop MCP tools for Electron app automation (Novee desktop app testing)
+DESKTOP_MCP_TOOLS = [
+    "mcp__desktop__desktop_launch",
+    "mcp__desktop__desktop_close",
+    "mcp__desktop__desktop_snapshot",
+    "mcp__desktop__desktop_screenshot",
+    "mcp__desktop__desktop_click",
+    "mcp__desktop__desktop_type",
+    "mcp__desktop__desktop_wait_for",
+    "mcp__desktop__desktop_get_text",
+    "mcp__desktop__desktop_evaluate",
+]
+
+# Android MCP tools for native Android app testing (mobile-mcp)
+ANDROID_MCP_TOOLS = [
+    # Device management
+    "mcp__android__mobile_list_available_devices",
+    "mcp__android__mobile_get_screen_size",
+    "mcp__android__mobile_get_orientation",
+    "mcp__android__mobile_set_orientation",
+    # App lifecycle
+    "mcp__android__mobile_list_apps",
+    "mcp__android__mobile_install_app",
+    "mcp__android__mobile_uninstall_app",
+    "mcp__android__mobile_launch_app",
+    "mcp__android__mobile_terminate_app",
+    # Screenshots & UI inspection
+    "mcp__android__mobile_take_screenshot",
+    "mcp__android__mobile_save_screenshot",
+    "mcp__android__mobile_list_elements_on_screen",
+    # UI interaction
+    "mcp__android__mobile_click_on_screen_at_coordinates",
+    "mcp__android__mobile_double_tap_on_screen",
+    "mcp__android__mobile_long_press_on_screen_at_coordinates",
+    "mcp__android__mobile_swipe_on_screen",
+    "mcp__android__mobile_type_keys",
+    "mcp__android__mobile_press_button",
+    "mcp__android__mobile_open_url",
+]
+
 # Playwright MCP tools for browser automation
 PLAYWRIGHT_TOOLS = [
     # Core navigation & screenshots
@@ -111,6 +151,10 @@ def create_client(project_dir: Path, model: str):
                 *PLAYWRIGHT_TOOLS,
                 # Allow Feature MCP tools for feature management
                 *FEATURE_MCP_TOOLS,
+                # Allow Desktop MCP tools for Electron app testing
+                *DESKTOP_MCP_TOOLS,
+                # Allow Android MCP tools for native Android app testing
+                *ANDROID_MCP_TOOLS,
             ],
         },
     }
@@ -127,7 +171,7 @@ def create_client(project_dir: Path, model: str):
     print("   - Sandbox enabled (OS-level bash isolation)")
     print(f"   - Filesystem restricted to: {project_dir.resolve()}")
     print("   - Bash commands restricted to allowlist (see security.py)")
-    print("   - MCP servers: playwright (browser), features (database)")
+    print("   - MCP servers: playwright (browser), features (database), desktop (Electron), android (mobile)")
     print("   - Project settings enabled (skills, commands, CLAUDE.md)")
     print()
 
@@ -141,6 +185,8 @@ def create_client(project_dir: Path, model: str):
                 *BUILTIN_TOOLS,
                 *PLAYWRIGHT_TOOLS,
                 *FEATURE_MCP_TOOLS,
+                *DESKTOP_MCP_TOOLS,
+                *ANDROID_MCP_TOOLS,
             ],
             mcp_servers={
                 "playwright": {"command": "npx", "args": ["@playwright/mcp@latest", "--viewport-size", "1280x720"]},
@@ -151,6 +197,19 @@ def create_client(project_dir: Path, model: str):
                         "PROJECT_DIR": str(project_dir.resolve()),
                         "PYTHONPATH": str(Path(__file__).parent.resolve()),
                     },
+                },
+                "desktop": {
+                    "command": "node",
+                    "args": [
+                        str(
+                            Path(__file__).parent.resolve()
+                            / "generations/novee-lead-gen/packages/mcp-desktop-automation/dist/index.js"
+                        )
+                    ],
+                },
+                "android": {
+                    "command": "npx",
+                    "args": ["-y", "@mobilenext/mobile-mcp@latest"],
                 },
             },
             hooks={

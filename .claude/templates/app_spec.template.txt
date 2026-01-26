@@ -20,6 +20,7 @@
   </overview>
 
   <technology_stack>
+    <!-- For Web Applications -->
     <frontend>
       <framework>React with Vite</framework>
       <styling>Tailwind CSS</styling>
@@ -35,6 +36,17 @@
     <communication>
       <api>RESTful endpoints</api>
     </communication>
+
+    <!-- For Mobile Applications (Android) - uncomment if building mobile app -->
+    <!--
+    <mobile_android>
+      <framework>React Native / Kotlin / Flutter</framework>
+      <min_sdk>21 (Android 5.0)</min_sdk>
+      <target_sdk>34 (Android 14)</target_sdk>
+      <testing>Android Emulator with mobile-mcp MCP tools</testing>
+      <deep_linking>Custom URI scheme (myapp://)</deep_linking>
+    </mobile_android>
+    -->
   </technology_stack>
 
   <prerequisites>

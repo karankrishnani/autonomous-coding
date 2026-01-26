@@ -328,6 +328,102 @@ Test like a human user with mouse and keyboard. Don't take shortcuts by using Ja
 
 ---
 
+## ANDROID APP AUTOMATION
+
+For testing native Android applications on an Android Emulator, use the MCP android automation tools from `mobile-mcp`.
+
+**Prerequisites:**
+1. Install Android SDK Platform Tools: `brew install --cask android-platform-tools`
+2. Start an Android Emulator: `emulator -avd <your_avd_name>`
+3. Verify ADB connection: `adb devices`
+
+**Available Tools:**
+
+Device Management:
+- `mobile_list_available_devices` - List connected Android devices/emulators
+- `mobile_get_screen_size` - Get device screen dimensions
+- `mobile_get_orientation` - Get current screen orientation (portrait/landscape)
+- `mobile_set_orientation` - Change screen orientation
+
+App Lifecycle:
+- `mobile_list_apps` - List installed applications
+- `mobile_install_app` - Install an APK on the device
+- `mobile_uninstall_app` - Remove an app from the device
+- `mobile_launch_app` - Start an app by package name
+- `mobile_terminate_app` - Stop a running app
+
+Screenshots & UI Inspection:
+- `mobile_take_screenshot` - Capture the current screen
+- `mobile_save_screenshot` - Save screenshot to a file
+- `mobile_list_elements_on_screen` - Get all UI elements visible on screen
+
+UI Interaction:
+- `mobile_click_on_screen_at_coordinates` - Tap at specific x,y coordinates
+- `mobile_double_tap_on_screen` - Double tap at coordinates
+- `mobile_long_press_on_screen_at_coordinates` - Long press at coordinates
+- `mobile_swipe_on_screen` - Swipe from one point to another
+- `mobile_type_keys` - Type text into focused element
+- `mobile_press_button` - Press hardware buttons (home, back, etc.)
+- `mobile_open_url` - Open a URL (launches browser or handles deep links)
+
+**Extended Capabilities via ADB (Bash):**
+
+For advanced testing scenarios, use ADB commands directly:
+
+```bash
+# Monitor app logs (Logcat)
+adb logcat -d -t 100                    # Last 100 log lines
+adb logcat *:E                          # Errors only
+adb logcat -s MyApp                     # Filter by tag
+
+# Deep linking / Intents
+adb shell am start -d "myapp://screen"  # Launch via URI
+adb shell am start -n com.app/.Activity # Launch specific activity
+
+# Device management
+emulator -list-avds                     # List available emulators
+adb shell input keyevent 4              # Press back button
+adb shell screencap /sdcard/screen.png  # Screenshot via ADB
+```
+
+**Example Workflow:**
+
+```
+// 1. List available devices
+const devices = await mobile_list_available_devices({})
+
+// 2. Launch the app
+await mobile_launch_app({ packageName: 'com.example.myapp' })
+
+// 3. Take initial screenshot
+await mobile_take_screenshot({ filename: 'android-initial.png' })
+
+// 4. Get UI elements
+const elements = await mobile_list_elements_on_screen({})
+
+// 5. Interact with UI
+await mobile_click_on_screen_at_coordinates({ x: 540, y: 960 })
+await mobile_type_keys({ text: 'test@example.com' })
+
+// 6. Swipe to scroll
+await mobile_swipe_on_screen({ startX: 540, startY: 1500, endX: 540, endY: 500 })
+
+// 7. Press back button
+await mobile_press_button({ button: 'back' })
+
+// 8. Terminate app when done
+await mobile_terminate_app({ packageName: 'com.example.myapp' })
+```
+
+**Key Benefits:**
+
+- Test native Android apps on emulators with real UI interaction
+- Use `mobile_list_elements_on_screen` to inspect UI hierarchy
+- Use ADB logcat to debug crashes and errors
+- Test deep links and intents via ADB commands
+
+---
+
 ## FEATURE TOOL USAGE RULES (CRITICAL - DO NOT VIOLATE)
 
 The feature tools exist to reduce token usage. **DO NOT make exploratory queries.**

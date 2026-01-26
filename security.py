@@ -55,6 +55,9 @@ ALLOWED_COMMANDS = {
     "bash",
     # Script execution
     "init.sh",  # Init scripts; validated separately
+    # Android development & testing
+    "adb",      # Android Debug Bridge for logcat, intents, device control
+    "emulator", # Android emulator management
 }
 
 # Commands that need additional validation even when in the allowlist
