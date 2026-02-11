@@ -7,5 +7,5 @@ venv/
 __pycache__/
 *.pyc
 
-# Novee project has its own git repository
-generations/novee-lead-gen/
+# Generated projects
+generations/

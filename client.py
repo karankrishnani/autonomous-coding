@@ -26,7 +26,7 @@ FEATURE_MCP_TOOLS = [
     "mcp__features__feature_create_bulk",
 ]
 
-# Desktop MCP tools for Electron app automation (Novee desktop app testing)
+# Desktop MCP tools for Electron app automation
 DESKTOP_MCP_TOOLS = [
     "mcp__desktop__desktop_launch",
     "mcp__desktop__desktop_close",
@@ -203,9 +203,12 @@ def create_client(project_dir: Path, model: str):
                     "args": [
                         str(
                             Path(__file__).parent.resolve()
-                            / "generations/novee-lead-gen/packages/mcp-desktop-automation/dist/index.js"
+                            / "mcp_desktop/dist/index.js"
                         )
                     ],
+                    "env": {
+                        "DESKTOP_APP_PATH": str((project_dir / "apps" / "desktop").resolve()),
+                    },
                 },
                 "android": {
                     "command": "npx",
