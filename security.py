@@ -27,6 +27,7 @@ ALLOWED_COMMANDS = {
     "chmod",  # For making scripts executable; validated separately
     # Directory
     "pwd",
+    "cd",
     # Output
     "echo",
     # Node.js development
@@ -44,6 +45,7 @@ ALLOWED_COMMANDS = {
     "sleep",
     "kill",  # Kill by PID
     "pkill",  # For killing dev servers; validated separately
+    "which",
     # Network/API testing
     "curl",
     # File operations
@@ -58,6 +60,11 @@ ALLOWED_COMMANDS = {
     # Android development & testing
     "adb",      # Android Debug Bridge for logcat, intents, device control
     "emulator", # Android emulator management
+    # Python development
+    "python",
+    "pip",
+    "venv",
+    "pytest",
 }
 
 # Commands that need additional validation even when in the allowlist
