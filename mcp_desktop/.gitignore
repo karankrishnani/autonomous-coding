@@ -1,0 +1,7 @@
+node_modules/
+dist/
+screenshots/
+
+# Allow test-app source (not a build artifact)
+!test-app/
+!test-app/dist/

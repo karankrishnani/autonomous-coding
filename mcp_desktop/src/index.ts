@@ -491,8 +491,7 @@ async function handleDesktopEvaluate(args: {
 
   console.error(`[MCP] Evaluating script. Session: ${args.sessionId}`);
 
-  // eslint-disable-next-line @typescript-eslint/no-implied-eval
-  const result = await session.window.evaluate(new Function(`return (${args.script})()`) as () => unknown);
+  const result = await session.window.evaluate(args.script);
 
   return JSON.stringify({
     result,
