@@ -62,9 +62,11 @@ ALLOWED_COMMANDS = {
     "emulator", # Android emulator management
     # Python development
     "python",
+    "python3",
     "pip",
     "venv",
     "pytest",
+    "make"
 }
 
 # Commands that need additional validation even when in the allowlist
